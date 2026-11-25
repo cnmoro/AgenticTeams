@@ -173,3 +173,16 @@ def test_mcp_server(env):
     assert resp[3]["result"]["isError"] is True
     assert resp[4]["error"]["code"] == -32601
     assert "via MCP" in run("--as", "beta", "inbox").stdout
+
+
+def test_install_picks_name_from_folder(env, tmp_path):
+    p1 = tmp_path / "a" / "Painel Vendas_IA"
+    p2 = tmp_path / "b" / "Painel Vendas_IA"
+    for p in (p1, p2):
+        p.mkdir(parents=True)
+    out = json.loads(run("install", cwd=p1).stdout)
+    assert out["agente"] == f"painel-vendas_ia@{p1}"
+    # same folder again: keeps the name
+    assert json.loads(run("install", "--project-dir", str(p1)).stdout)["agente"].startswith("painel-vendas_ia@")
+    # another folder with the same basename gets a suffix
+    assert json.loads(run("install", "--project-dir", str(p2)).stdout)["agente"] == f"painel-vendas_ia-2@{p2}"

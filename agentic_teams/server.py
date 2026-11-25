@@ -238,9 +238,10 @@ async def rooms_create(request):
                          data.get("kind", "projeto"), request["who"]["id"], data.get("members") or [])
     d = s.room_dict(room)
     publish(request.app, "room", d)
+    invited = [f"@{m['name']}" for m in d["members"] if m["name"] != request["who"]["name"]]
     await post_message(request.app, room, request["who"],
-                       f"Sala criada: #{room['name']}" + (f" — {room['description']}" if room["description"] else ""),
-                       kind="system")
+                       f"Sala criada: #{room['name']}" + (f" — {room['description']}" if room["description"] else "")
+                       + (f"\nMembros: {', '.join(invited)}" if invited else ""), kind="system")
     return web.json_response(d)
 
 
@@ -267,9 +268,19 @@ async def room_join(request):
     s: Store = request.app["store"]
     room = s.room(request.match_info["room"])
     a = target_agent(request, data)
-    s.join(room["id"], a["id"], data.get("notify"))
+    new = s.join(room["id"], a["id"], data.get("notify"))
     d = s.room_dict(room)
     publish(request.app, "room", d)
+    if new and a["id"] != request["who"]["id"] and a["kind"] == "agent":
+        # tell the agent (this wakes its session) and show it who is there
+        others = [f"@{m['name']}" for m in d["members"] if m["name"] != a["name"]]
+        await post_message(request.app, room, request["who"],
+                           f"@{a['name']} você foi adicionado à sala #{room['name']}"
+                           + (f" ({room['description']})" if room["description"] else "")
+                           + f". Membros: {', '.join(others) or 'só você por enquanto'}.", kind="system")
+    elif new:
+        await post_message(request.app, room, s.agent_by_name("sistema"),
+                           f"{a['name']} entrou na sala.", kind="system")
     return web.json_response(d)
 
 

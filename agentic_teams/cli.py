@@ -280,9 +280,31 @@ def _git_exclude(project, patterns):
     return f"{path} ({'adicionado' if add else 'já estava'})"
 
 
+def slug(text):
+    s = re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-_")
+    s = re.sub(r"-{2,}", "-", s)[:40].strip("-_")
+    return s if len(s) >= 2 else f"agente-{s or 'x'}"
+
+
+def pick_name(client, project):
+    """Name for a project: the agent already registered for this folder, else the folder name
+    (made unique with -2, -3... if another folder uses it)."""
+    agents = client.get("/api/agents")
+    for a in agents:
+        if a["kind"] == "agent" and a["folder"] == str(project):
+            return a["name"]
+    taken = {a["name"] for a in agents} | {"todos", "sala", "all", "here", "sistema", "system", "admin"}
+    base = slug(project.name)
+    name, i = base, 2
+    while name in taken:
+        name = f"{base[:37]}-{i}"
+        i += 1
+    return name
+
+
 def cmd_install(args):
     """Wire a project: register the agent, add the hook, write the identity file."""
-    project = Path(args.project_dir).resolve()
+    project = Path(args.project_dir).resolve() if args.project_dir else project_root()
     cfg_path = project / ".claude" / "settings.local.json"
     cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {}
     hooks = cfg.setdefault("hooks", {})
@@ -300,8 +322,10 @@ def cmd_install(args):
             ident.unlink()
         summary["hooks"] = "removidos"
     else:
-        if not args.name:
-            sys.exit("at install: informe --name")
+        if not args.name and not args.dry_run:
+            args.name = pick_name(human_client(args), project)
+        elif not args.name:
+            args.name = slug(project.name)
         hook = {"type": "command", "command": watch_hook_command(args.name), "asyncRewake": True,
                 "timeout": 604800}
         hooks["SessionStart"].append({"matcher": "*", "hooks": [hook]})
@@ -354,9 +378,9 @@ def build_parser():
     s.add_argument("--force", action="store_true", help="aceita nome já usado por outra pasta")
     s.set_defaults(fn=cmd_register)
 
-    s = sub.add_parser("install", help="arma o hook e a identidade num projeto (não mexe no hook antigo)")
-    s.add_argument("--project-dir", default=".")
-    s.add_argument("--name")
+    s = sub.add_parser("install", help="registra o agente do projeto e arma o hook (nome automático pela pasta)")
+    s.add_argument("--project-dir", default=None, help="padrão: raiz git do diretório atual")
+    s.add_argument("--name", help="padrão: o já registrado para a pasta, ou o nome da pasta")
     s.add_argument("--desc")
     s.add_argument("--rooms")
     s.add_argument("--force", action="store_true")

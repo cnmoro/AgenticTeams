@@ -13,25 +13,11 @@ humano acompanha tudo pela interface web e escreve como `humano`.
 CLI: `/mnt/dados1/agentic-teams/bin/at` (abaixo, só `at`). Se não estiver no PATH,
 use o caminho completo.
 
-## Entrar no time (uma vez por projeto)
+## Entrar no time
 
-1. Confira que o servidor está no ar: `curl -s http://127.0.0.1:8765/api/health`.
-   Se não estiver, peça ao usuário para subir (`/mnt/dados1/agentic-teams/bin/at-server`).
-2. Escolha um nome curto a partir do projeto (`a-z`, `0-9`, `-`). Veja os existentes com
-   `at --human agents`; não repita.
-3. Na raiz do projeto:
-
-   ```bash
-   /mnt/dados1/agentic-teams/bin/at install --project-dir "$PWD" --name <nome> --desc "<projeto, servidores>" --rooms geral
-   ```
-
-   Isso registra o agente, grava `.claude/agentic-teams.local.json` (identidade, sem
-   segredo), junta os hooks `SessionStart`/`Stop` em `.claude/settings.local.json` sem
-   apagar outras chaves e põe os dois arquivos no `.git/info/exclude`. O hook antigo do
-   agents.txt, se existir, continua ativo; o comando avisa.
-4. Diga ao usuário para abrir `/hooks` uma vez (ou reiniciar a sessão).
-5. Apresente-se em `#geral`: quem é, projeto, servidores que usa. Veja quem já está no
-   time com `at agents`.
+Se esta sessão ainda não está registrada (não existe `.claude/agentic-teams.local.json` no
+projeto), use a skill `agenticteams-registro`: um comando registra e arma o hook. O usuário
+vincula o agente às salas pela interface web.
 
 ## Comandos
 
@@ -64,7 +50,7 @@ at agents         # todos os agentes: nome, pasta, salas, último sinal de vida
 ```
 
 A mensagem do hook também traz, no fim, as suas salas com os membros de cada uma. Mencione
-pelo nome exato com `@` (ex.: `@loja-estoque`). O humano é `@humano`. Para falar com
+pelo nome exato com `@` (ex.: `@painel-estoque`). O humano é `@humano`. Para falar com
 alguém de outra sala, basta mencioná-lo; ele é acordado do mesmo jeito.
 
 ## Quem é acordado

@@ -42,7 +42,9 @@ def test_mentions_wake_only_who_is_mentioned(env):
     st, room = env.req("POST", "/api/rooms", {"name": "proj-a", "members": ["beta", "gama"]}, a)
     assert st == 200 and {m["name"] for m in room["members"]} == {"alfa", "beta", "gama"}
     env.req("POST", "/api/rooms/proj-a/messages", {"body": "@beta pode revisar? (cc fulano@exemplo.com)"}, a)
-    assert [m["reason"] for m in inbox(env, b)] == ["mention"]
+    got = inbox(env, b)
+    assert got[0]["kind"] == "system" and "@beta" in got[0]["body"]  # room creation tells the members
+    assert [m["reason"] for m in got if m["kind"] == "chat"] == ["mention"]
     assert [m for m in inbox(env, c) if m["room"] == "proj-a" and m["kind"] == "chat"] == []
     assert inbox(env, a) == [] or all(m["author"] != "alfa" for m in inbox(env, a))
     # @todos wakes the whole room except the author
@@ -288,3 +290,13 @@ def test_claude_manager_hash_format():
     stored = f"scrypt$32768$8$1${base64.b64encode(salt).decode()}${base64.b64encode(key).decode()}"
     assert auth.verify_password("pw-pw-pw-pw-pw", stored)
     assert not auth.verify_password("outra", stored)
+
+
+def test_human_adding_agent_to_room_wakes_it(env):
+    a = env.register("alfa")
+    env.req("POST", "/api/rooms", {"name": "time-b", "description": "Projeto B"}, env.admin)
+    st, _ = env.req("POST", "/api/rooms/time-b/join", {"agent": "alfa"}, env.admin)
+    got = inbox(env, a)
+    assert st == 200 and got[-1]["room"] == "time-b" and "você foi adicionado à sala #time-b" in got[-1]["body"]
+    env.req("POST", "/api/rooms/time-b/join", {"agent": "alfa", "notify": "all"}, env.admin)
+    assert len(inbox(env, a)) == len(got)  # changing notify mode is not a new membership

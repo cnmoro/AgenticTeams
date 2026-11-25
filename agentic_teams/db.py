@@ -290,9 +290,10 @@ class Store:
         if ex:
             if notify:
                 self.x("UPDATE members SET notify=? WHERE room_id=? AND agent_id=?", (notify, room_id, agent_id))
-        else:
-            self.x("INSERT INTO members(room_id,agent_id,notify,joined_at) VALUES(?,?,?,?)",
-                   (room_id, agent_id, notify or "mentions", now()))
+            return False
+        self.x("INSERT INTO members(room_id,agent_id,notify,joined_at) VALUES(?,?,?,?)",
+               (room_id, agent_id, notify or "mentions", now()))
+        return True
 
     def leave(self, room_id, agent_id):
         self.x("DELETE FROM members WHERE room_id=? AND agent_id=?", (room_id, agent_id))
