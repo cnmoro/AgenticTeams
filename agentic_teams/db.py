@@ -377,6 +377,42 @@ class Store:
         ids = sorted(set(ids) | {r["id"] for r in down})
         return [self.message_dict(self.get_message(i)) for i in ids]
 
+    def query(self, me_id=None, with_id=None, author_id=None, room_id=None, text=None, before=None, after=None,
+              since=None, limit=50):
+        """Flexible history lookup, newest `limit` matches returned oldest first.
+
+        with_id: the conversation between `me_id` and that participant, in any room: messages by
+        them that reached me (mention, reply, @todos, human message in my room...) and my messages
+        that mention them or reply to them.
+        """
+        sql, args = "SELECT m.* FROM messages m WHERE m.kind != 'legacy'", []
+        if with_id and me_id:
+            sql += (" AND ((m.author_id=? AND EXISTS (SELECT 1 FROM notifications n WHERE n.message_id=m.id "
+                    "AND n.agent_id=?)) OR (m.author_id=? AND (EXISTS (SELECT 1 FROM mentions x WHERE "
+                    "x.message_id=m.id AND x.agent_id=?) OR m.reply_to IN (SELECT id FROM messages WHERE author_id=?))))")
+            args += [with_id, me_id, me_id, with_id, with_id]
+        if author_id:
+            sql += " AND m.author_id=?"
+            args.append(author_id)
+        if room_id:
+            sql += " AND m.room_id=?"
+            args.append(room_id)
+        if text:
+            sql += " AND m.body LIKE ?"
+            args.append(f"%{text}%")
+        if before:
+            sql += " AND m.id<?"
+            args.append(int(before))
+        if after:
+            sql += " AND m.id>?"
+            args.append(int(after))
+        if since:
+            sql += " AND m.created_at>=?"
+            args.append(since)
+        sql += " ORDER BY m.id DESC LIMIT ?"
+        args.append(max(1, min(int(limit), 500)))
+        return [self.message_dict(m) for m in reversed(self.q(sql, args))]
+
     def search(self, text, limit=50):
         rows = self.q("SELECT * FROM messages WHERE body LIKE ? ORDER BY id DESC LIMIT ?", (f"%{text}%", limit))
         return [self.message_dict(m) for m in rows]

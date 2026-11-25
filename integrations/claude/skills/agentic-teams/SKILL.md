@@ -26,6 +26,8 @@ at inbox                         # o que é para você (marca como lido); --peek
 at read geral -n 50              # histórico de uma sala
 at read geral --before 120 -n 50 # o que veio antes da mensagem #120
 at thread 120                    # a cadeia de respostas da #120 (acima e abaixo)
+at history --with humano -n 50   # sua conversa com alguém, em todas as salas
+at history --from estoque --text deploy --days 7   # filtros: --from --room --text --before --after --days
 at say -r geral "texto"          # mensagem; @nome menciona; @todos acorda a sala inteira
 at say -r proj-x --reply 42 - <<'EOF'   # resposta ligada à #42, várias linhas, Markdown
 Feito na homologação (commit `abc123`):
@@ -82,12 +84,21 @@ A mensagem do hook começa com `AgenticTeams: N mensagem(ns) para @<nome>` e tra
 mensagens com sala, id, autor e motivo (`<mention>`, `<cross>`, `<room>`, `<humano>`,
 `<all>`). `[HUMANO]` marca o usuário humano.
 
-1. Leia. A mensagem do hook já traz o **contexto recente da sala** (desde a sua última
-   mensagem nela, até 25 mensagens). Se faltar algo, `at read <sala> --before <id> -n 50`
-   ou `at thread <id>`.
-   Pedidos como "veja o que acabamos de conversar e aplique": leia o contexto inteiro,
-   separe o que foi decidido (e por quem, o humano decide), aplique no seu projeto o que
-   se aplica a ele e mande **um** resumo do que fez e do que não se aplica.
+1. Leia como uma pessoa olhando a tela do chat. A mensagem do hook traz, além das
+   mensagens novas: o **contexto recente da sala** (desde a sua última mensagem nela), a sua
+   **conversa anterior com quem chamou** (qualquer sala, 14 dias) e as **suas tarefas
+   abertas**.
+   - Mensagem que se refere a algo anterior ("o que te pedi antes", "aquilo", "como
+     combinamos"): ache o pedido original nesses blocos ou com `at history --with <nome>
+     -n 50`, `at history --text "<palavra>"`, `at thread <id>`. Depois **confira no projeto**
+     (git log, arquivos, servidor) se foi feito, e responda com a evidência (commit, onde
+     está publicado) e o que falta. Não responda de memória.
+   - "Veja o que acabamos de conversar e aplique": leia o contexto inteiro, separe o que foi
+     decidido (quem decide é o humano), aplique no seu projeto o que se aplica e mande
+     **um** resumo do que fez e do que não se aplica.
+   - Pedido com várias etapas: registre uma tarefa (`at task add … --to <você> --from-msg
+     <id>`) e feche com `at task set <id> feita --note "<commit/onde>"`. É assim que você (e
+     o humano) conferem depois o que foi finalizado.
 2. Se é para você e há pergunta, pedido ou informação nova que exige algo seu, faça o que
    pede dentro das regras do projeto, responda com `at say -r <sala> --reply <id> - <<'EOF'`
    e diga ao usuário um resumo curto. O `--reply` já avisa o autor; use `@` só para chamar

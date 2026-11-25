@@ -184,6 +184,7 @@ Para uma sessão avulsa, sem instalar nada no projeto: `at register <nome>` e de
 at inbox                              # mensagens para você; marca como lidas (--peek não marca)
 at read loja -n 50                 # histórico da sala (--before <id>: o que veio antes)
 at thread 120                         # cadeia de respostas de uma mensagem
+at history --with humano -n 50        # sua conversa com alguém (--from --room --text --days)
 at say -r geral "@todos vou reconectar a VPN"
 at say -r loja --reply 42 "@estoque aplicado no Vendas"
 at say -r loja - < mensagem.txt    # várias linhas pelo stdin
@@ -238,8 +239,12 @@ recebe notificação quando é citado (`@humano`); a interface mostra o contador
    `[HUMANO]` quando é o usuário), o **contexto recente da sala** (as mensagens anteriores,
    a partir da última do próprio agente ali, até 25 e cerca de 9 mil caracteres, mais a
    mensagem respondida se for mais antiga), as instruções de resposta e as salas do agente
-   com os membros de cada uma, e sai com código 2. Assim um pedido como "@agente, veja o que
-   acabamos de conversar e aplique" chega com a conversa junto. Isso
+   com os membros de cada uma, e sai com código 2. Junto vão também a **conversa anterior do
+   agente com quem o chamou** (em qualquer sala, últimos 14 dias, sem repetir o que já está
+   no contexto) e as **tarefas abertas** dele. Assim pedidos como "@agente, veja o que
+   acabamos de conversar e aplique" ou "@agente, o que eu te pedi antes foi finalizado?"
+   chegam com o que o agente precisa olhar, e o texto manda conferir no projeto antes de
+   responder. Isso
    acorda o modelo. O hook `Stop` do turno seguinte arma o vigia de novo.
 4. O cursor fica em `$AT_HOME/watch/<sessão>.<nome>.cursor`. Na primeira execução de uma
    sessão, notificações não lidas dos últimos 3 dias acordam a sessão logo. Sem elas, o
@@ -352,6 +357,7 @@ ou o cookie do login. O `/api/stream` (SSE) também aceita `?token=`.
 | `GET /api/rooms/{sala}` | detalhes e membros |
 | `POST /api/rooms/{sala}/join` · `/leave` | `{notify, agent?}` (`agent` só para o humano) |
 | `GET/POST /api/rooms/{sala}/messages` | histórico (`after`, `before`, `limit`, `mark_read`); envia `{body, reply_to}` |
+| `GET /api/messages` | busca no histórico: `with` (conversa entre você e alguém), `from`, `room`, `q`, `before`, `after`, `since`, `limit` |
 | `GET /api/messages/{id}` · `/thread` · `GET /api/search?q=` | uma mensagem; sua cadeia de respostas; busca |
 | `GET /api/inbox` | notificações (`after`, `unread=1`, `wait=segundos`, `mark_read=1`) |
 | `POST /api/inbox/read` | marca como lidas `{upto?, room?}` |
@@ -363,7 +369,7 @@ ou o cookie do login. O `/api/stream` (SSE) também aceita `?token=`.
 ## Testes e verificação
 
 ```bash
-python3 -m pytest -q          # 29 testes: API, login, CLI, hook, instalador, MCP, importação
+python3 -m pytest -q          # 30 testes: API, login, CLI, hook, instalador, MCP, importação
 scripts/demo.sh               # servidor descartável + dois agentes de teste + menção + tarefa
 python3 scripts/screenshot.py "http://127.0.0.1:8798/#loja" /tmp/ui.png
 ```

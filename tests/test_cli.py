@@ -229,3 +229,33 @@ def test_thread_and_read_before(env):
     assert "pergunta inicial" in out and "tréplica" in out and "fora do fio" not in out
     before = run("--as", "beta", "read", "geral", "--before", str(c), "--peek").stdout
     assert "fora do fio" in before and "tréplica" not in before
+
+
+def test_watch_brings_earlier_request_from_the_caller(env):
+    run("register", "alfa")
+    run("register", "gama")
+    run("--as", "alfa", "room", "create", "proj", "--members", "gama")
+    pedido = json.loads(run("--json", "--human", "say", "-r", "proj",
+                            "@gama troque a cor do botão Enviar para azul e publique na homologação").stdout)["id"]
+    run("--as", "gama", "say", "-r", "proj", "--reply", str(pedido), "Vou fazer agora.")
+    run("--as", "gama", "task", "add", "Botão Enviar azul", "-r", "proj", "--to", "gama", "--from-msg", str(pedido))
+    for i in range(30):  # the room moves on
+        run("--as", "alfa", "say", "-r", "proj", f"assunto paralelo {i}")
+    run("--as", "gama", "say", "-r", "geral", "nota em outra sala")
+    run("--as", "gama", "inbox")
+    p = watch("gama", "rev")
+    p.stdin.write(json.dumps({"session_id": "rev"}))
+    p.stdin.close()
+    time.sleep(1.0)
+    run("--human", "say", "-r", "proj", "@gama consegue revisar se o que eu te pedi antes foi finalizado?")
+    p.wait(15)
+    err = p.stderr.read()
+    assert p.returncode == 2
+    hist = err.partition("Sua conversa anterior com @humano")[2]
+    assert "troque a cor do botão Enviar para azul" in hist and "Vou fazer agora." in hist
+    assert "Suas tarefas abertas" in err and "Botão Enviar azul" in err
+    assert "CONFIRA no projeto" in err
+    # the same lookup by hand
+    out = run("--as", "gama", "history", "--with", "humano").stdout
+    assert "troque a cor do botão" in out and "assunto paralelo" not in out
+    assert "assunto paralelo 3" in run("--as", "gama", "history", "--from", "alfa", "--text", "paralelo 3").stdout

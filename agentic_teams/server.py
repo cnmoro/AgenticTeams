@@ -328,6 +328,24 @@ async def message_get(request):
     return web.json_response(s.message_dict(s.get_message(int(request.match_info["id"]))))
 
 
+async def messages_query(request):
+    """GET /api/messages?with=&from=&room=&q=&before=&after=&since=&limit= (see Store.query)."""
+    s: Store = request.app["store"]
+    qy = request.query
+
+    def agent_id(key):
+        if not qy.get(key):
+            return None
+        a = s.agent_by_name(qy[key].lstrip("@").lower())
+        if not a:
+            raise Error(f"participante não encontrado: {qy[key]}", 404)
+        return a["id"]
+    return web.json_response(s.query(
+        me_id=request["who"]["id"], with_id=agent_id("with"), author_id=agent_id("from"),
+        room_id=s.room(qy["room"])["id"] if qy.get("room") else None, text=qy.get("q"),
+        before=qy.get("before"), after=qy.get("after"), since=qy.get("since"), limit=qy.get("limit", 50)))
+
+
 async def message_thread(request):
     return web.json_response(request.app["store"].thread(int(request.match_info["id"])))
 
@@ -641,6 +659,7 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     r.add_get("/api/rooms/{room}/messages", messages_list)
     r.add_post("/api/rooms/{room}/messages", messages_post)
     r.add_get("/api/messages/{id:\\d+}", message_get)
+    r.add_get("/api/messages", messages_query)
     r.add_get("/api/messages/{id:\\d+}/thread", message_thread)
     r.add_get("/api/search", search)
     r.add_get("/api/inbox", inbox)

@@ -187,6 +187,18 @@ def cmd_show(args):
     out(args, m, fmt_message(m, show_room=True))
 
 
+def cmd_history(args):
+    c = client_for(args)
+    since = None
+    if args.days:
+        from datetime import datetime, timedelta
+        since = (datetime.now().astimezone() - timedelta(days=args.days)).isoformat(timespec="seconds")
+    data = c.get("/api/messages", **{"with": args.with_, "from": args.from_, "room": args.room and args.room.lstrip("#"),
+                                     "q": args.text, "before": args.before, "after": args.after, "since": since,
+                                     "limit": args.limit})
+    out(args, data, "\n".join(fmt_message(m, show_room=True) for m in data) or "(nada encontrado)")
+
+
 def cmd_thread(args):
     c = client_for(args)
     data = c.get(f"/api/messages/{args.id}/thread")
@@ -446,6 +458,17 @@ def build_parser():
     s.add_argument("--before", type=int, help="só mensagens antes deste id (o contexto de uma menção)")
     s.add_argument("--peek", action="store_true", help="não marca como lidas")
     s.set_defaults(fn=cmd_read)
+
+    s = sub.add_parser("history", help="navega no histórico: conversa com alguém, de um autor, por texto...")
+    s.add_argument("--with", dest="with_", metavar="NOME", help="conversa entre você e NOME, em todas as salas")
+    s.add_argument("--from", dest="from_", metavar="NOME", help="só mensagens de NOME")
+    s.add_argument("--room", "-r")
+    s.add_argument("--text", "-t", help="contém este texto")
+    s.add_argument("--before", type=int)
+    s.add_argument("--after", type=int)
+    s.add_argument("--days", type=float, help="só dos últimos N dias")
+    s.add_argument("--limit", "-n", type=int, default=30)
+    s.set_defaults(fn=cmd_history)
 
     s = sub.add_parser("thread", help="cadeia de respostas de uma mensagem (acima e abaixo dela)")
     s.add_argument("id", type=int)
