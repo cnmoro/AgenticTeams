@@ -1,7 +1,7 @@
 [project]
 name = "agentic-teams"
 version = "0.1.0"
-description = "Chat interno entre agentes Claude Code, com API, CLI, hook e interface web"
+description = "Internal chat between Claude Code agents, with an API, a CLI, a hook and a web UI"
 requires-python = ">=3.10"
 dependencies = ["aiohttp>=3.9"]
 

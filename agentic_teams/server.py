@@ -15,6 +15,7 @@ from pathlib import Path
 from aiohttp import web
 
 from . import auth, config, legacy, spawn
+from .i18n import LANGUAGES, t as _t
 from .db import Error, Store, now
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -28,7 +29,7 @@ def jerr(msg, status):
 
 
 # --------------------------------------------------------------------------- middleware
-PUBLIC = {"/login", "/api/login", "/api/health", "/static/login.js", "/static/style.css"}
+PUBLIC = {"/login", "/api/login", "/api/health", "/static/login.js", "/static/style.css", "/static/i18n.js"}
 
 
 def host_of(request):
@@ -54,12 +55,12 @@ async def guard(request, handler):
     """
     app = request.app
     if host_of(request) not in app["allowed_hosts"]:
-        return jerr(f"host não permitido: {request.host}", 403)
+        return jerr(f"host not allowed: {request.host}", 403)
     origin = request.headers.get("Origin")
     if origin and request.method not in ("GET", "HEAD", "OPTIONS"):
         ohost = origin.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0]
         if ohost not in app["allowed_hosts"]:
-            return jerr("origem não permitida", 403)
+            return jerr("origin not allowed", 403)
     path = request.path
     store: Store = app["store"]
     if path not in PUBLIC:
@@ -74,7 +75,7 @@ async def guard(request, handler):
             else:
                 who = store.agent_by_token(token)
                 if not who:
-                    return jerr("token inválido", 401)
+                    return jerr("invalid token", 401)
                 request["who"], request["admin"] = who, False
                 store.touch(who["id"])
         elif sess:
@@ -84,7 +85,7 @@ async def guard(request, handler):
         elif path == "/":
             raise web.HTTPFound("/login")
         elif path.startswith("/api/"):
-            return jerr("não autenticado: faça login ou use Authorization: Bearer", 401)
+            return jerr("not authenticated: log in or use Authorization: Bearer", 401)
         elif not path.startswith("/static/"):
             raise web.HTTPFound("/login")
     try:
@@ -92,7 +93,7 @@ async def guard(request, handler):
     except Error as e:
         return jerr(str(e), e.status)
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as e:
-        return jerr(f"requisição inválida: {e}", 400)
+        return jerr(f"invalid request: {e}", 400)
 
 
 # --------------------------------------------------------------------------- events
@@ -128,9 +129,14 @@ async def body_json(request):
     return data
 
 
+def tr(app, key, **kw):
+    """Text in the language of this install (config "language")."""
+    return _t(app["settings"]["language"], key, **kw)
+
+
 def need_admin(request):
     if not request.get("admin"):
-        raise Error("operação restrita ao usuário humano (token de administrador)", 403)
+        raise Error("only the human user (admin token) may do this", 403)
 
 
 # --------------------------------------------------------------------------- pages
@@ -166,7 +172,7 @@ async def login(request):
         app["limiter"].end(ip, bool(email))
     if not email:
         log.warning("login falhou para %r de %s", str(data.get("email", ""))[:100], ip)
-        return jerr("E-mail ou senha inválidos", 401)
+        return jerr("Invalid email or password", 401)
     log.info("login de %s a partir de %s", email, ip)
     resp = web.json_response({"ok": True})
     resp.set_cookie(auth.COOKIE, app["sessions"].create(email), max_age=app["sessions"].ttl_s, path="/",
@@ -184,7 +190,7 @@ async def logout(request):
 
 
 async def health(request):
-    return web.json_response({"ok": True, "time": now()})
+    return web.json_response({"ok": True, "time": now(), "language": request.app["settings"]["language"]})
 
 
 # --------------------------------------------------------------------------- agents
@@ -210,16 +216,16 @@ async def agents_register(request):
     ex = s.agent_by_name(name)
     folder = data.get("folder") or None
     if ex and ex["kind"] == "agent" and ex["folder"] and folder and ex["folder"] != folder and not data.get("force"):
-        raise Error(f"o nome {name} já pertence ao agente da pasta {ex['folder']}; escolha outro nome ou use force",
+        raise Error(f"the name {name} belongs to the agent of folder {ex['folder']}; pick another name or use force",
                     409)
     agent, token = s.register_agent(name, folder, data.get("description", ""),
                                     rooms=data.get("rooms") or [])
     config.save_agent_token(agent["name"], token)
     d = s.agent_dict(agent)
     if not ex:
-        await post_message(request.app, s.room("geral"), s.agent_by_name("sistema"),
-                           f"Novo agente no time: {d['handle']}" +
-                           (f" — {agent['description']}" if agent["description"] else ""), kind="system")
+        await post_message(request.app, s.general_room(), s.system(),
+                           tr(request.app, "new_agent", handle=d["handle"],
+                              desc=f" — {agent['description']}" if agent["description"] else ""), kind="system")
     publish(request.app, "agent", d)
     return web.json_response({"agent": d, "token": token})
 
@@ -235,13 +241,15 @@ async def rooms_create(request):
     data = await body_json(request)
     s: Store = request.app["store"]
     room = s.create_room(data.get("name"), data.get("title"), data.get("description", ""),
-                         data.get("kind", "projeto"), request["who"]["id"], data.get("members") or [])
+                         data.get("kind", "project"), request["who"]["id"], data.get("members") or [])
     d = s.room_dict(room)
     publish(request.app, "room", d)
     invited = [f"@{m['name']}" for m in d["members"] if m["name"] != request["who"]["name"]]
-    await post_message(request.app, room, request["who"],
-                       f"Sala criada: #{room['name']}" + (f" — {room['description']}" if room["description"] else "")
-                       + (f"\nMembros: {', '.join(invited)}" if invited else ""), kind="system")
+    text = tr(request.app, "room_created", room=room["name"],
+              desc=f" — {room['description']}" if room["description"] else "")
+    if invited:
+        text += "\n" + tr(request.app, "members", names=", ".join(invited))
+    await post_message(request.app, room, request["who"], text, kind="system")
     return web.json_response(d)
 
 
@@ -258,7 +266,7 @@ def target_agent(request, data):
         need_admin(request)
         a = s.agent_by_name(name.lstrip("@").lower())
         if not a:
-            raise Error(f"agente não encontrado: {name}", 404)
+            raise Error(f"agent not found: {name}", 404)
         return a
     return request["who"]
 
@@ -275,12 +283,12 @@ async def room_join(request):
         # tell the agent (this wakes its session) and show it who is there
         others = [f"@{m['name']}" for m in d["members"] if m["name"] != a["name"]]
         await post_message(request.app, room, request["who"],
-                           f"@{a['name']} você foi adicionado à sala #{room['name']}"
-                           + (f" ({room['description']})" if room["description"] else "")
-                           + f". Membros: {', '.join(others) or 'só você por enquanto'}.", kind="system")
+                           tr(request.app, "added_to_room", agent=a["name"], room=room["name"],
+                              desc=f" ({room['description']})" if room["description"] else "",
+                              others=", ".join(others) or tr(request.app, "only_you")), kind="system")
     elif new:
-        await post_message(request.app, room, s.agent_by_name("sistema"),
-                           f"{a['name']} entrou na sala.", kind="system")
+        await post_message(request.app, room, s.system(), tr(request.app, "joined_room", agent=a["name"]),
+                           kind="system")
     return web.json_response(d)
 
 
@@ -310,8 +318,8 @@ async def messages_list(request):
 async def messages_post(request):
     s: Store = request.app["store"]
     room = s.room(request.match_info["room"])
-    if room["kind"] == "legado":
-        raise Error("a sala legado é somente leitura", 403)
+    if room["kind"] == "legacy":
+        raise Error("the legacy room is read-only", 403)
     data = await body_json(request)
     who = request["who"]
     meta = {}
@@ -338,7 +346,7 @@ async def messages_query(request):
             return None
         a = s.agent_by_name(qy[key].lstrip("@").lower())
         if not a:
-            raise Error(f"participante não encontrado: {qy[key]}", 404)
+            raise Error(f"participant not found: {qy[key]}", 404)
         return a["id"]
     return web.json_response(s.query(
         me_id=request["who"]["id"], with_id=agent_id("with"), author_id=agent_id("from"),
@@ -395,11 +403,6 @@ async def inbox_read(request):
 
 
 # --------------------------------------------------------------------------- tasks
-def task_line(t):
-    to = f" → @{t['assignee']}" if t["assignee"] else " (sem responsável)"
-    return f"tarefa #{t['id']} «{t['title']}»{to}"
-
-
 async def tasks_list(request):
     s: Store = request.app["store"]
     qy = request.query
@@ -408,7 +411,7 @@ async def tasks_list(request):
     if qy.get("assignee"):
         a = s.agent_by_name(qy["assignee"].lstrip("@").lower())
         if not a:
-            raise Error(f"agente não encontrado: {qy['assignee']}", 404)
+            raise Error(f"agent not found: {qy['assignee']}", 404)
         assignee = a["id"]
     return web.json_response(s.list_tasks(room_id, assignee, qy.get("status")))
 
@@ -416,15 +419,16 @@ async def tasks_list(request):
 async def tasks_create(request):
     data = await body_json(request)
     s: Store = request.app["store"]
-    room = s.room(data.get("room") or "geral")
+    room = s.room(data.get("room") or "general")
     t = s.create_task(room["id"], request["who"], data.get("title"), data.get("body", ""), data.get("assignee"),
                       data.get("source_message_id"))
     td = s.task_dict(t)
-    text = f"Nova {task_line(td)}"
+    to = tr(request.app, "task_to", name=td["assignee"]) if td["assignee"] else tr(request.app, "task_unassigned")
+    text = tr(request.app, "new_task", id=td["id"], title=td["title"], to=to)
     if td["body"]:
         text += f"\n{td['body']}"
     if td["source_message_id"]:
-        text += f"\n(origem: mensagem #{td['source_message_id']})"
+        text += "\n" + tr(request.app, "task_origin", id=td["source_message_id"])
     await post_message(request.app, room, request["who"], text, kind="task",
                        reply_to=td["source_message_id"], meta={"task_id": td["id"], "event": "created"})
     publish(request.app, "task", td)
@@ -440,15 +444,16 @@ async def tasks_update(request):
     td = s.task_dict(t)
     changes = []
     if td["status"] != before["status"]:
-        changes.append(f"{before['status']} → {td['status']}")
+        changes.append(f"{tr(request.app, 'status_' + before['status'])} → {tr(request.app, 'status_' + td['status'])}")
     if td["assignee"] != before["assignee"]:
-        changes.append(f"responsável: {before['assignee'] or '—'} → @{td['assignee']}" if td["assignee"]
-                       else "sem responsável")
+        changes.append(tr(request.app, "assignee_change", old=before["assignee"] or "—",
+                          new=f"@{td['assignee']}" if td["assignee"] else tr(request.app, "unassigned")))
     if td["title"] != before["title"]:
-        changes.append("título alterado")
+        changes.append(tr(request.app, "title_changed"))
     note = data.get("note")
     if changes or note:
-        text = f"Tarefa #{td['id']} «{td['title']}»: {'; '.join(changes) or 'comentário'}"
+        text = tr(request.app, "task_update", id=td["id"], title=td["title"],
+                  changes="; ".join(changes) or tr(request.app, "comment"))
         if note:
             text += f"\n{note}"
         watchers = {td["creator"], before["assignee"], td["assignee"]} - {request["who"]["name"], None}
@@ -476,25 +481,24 @@ async def spawns_create(request):
     name = (data.get("name") or "").strip().lower()
     prompt = (data.get("prompt") or "").strip()
     if not prompt:
-        raise Error("informe o prompt do subagente")
+        raise Error("the subagent needs a prompt")
     rooms = [r.lstrip("#").lower() for r in (data.get("rooms") or [])]
     for r in rooms:
         s.room(r)
     if s.agent_by_name(name):
-        raise Error(f"já existe um participante chamado {name}; escolha outro nome", 409)
+        raise Error(f"there is already a participant called {name}; pick another name", 409)
     from .db import NAME_RE, RESERVED
     if not NAME_RE.match(name) or name in RESERVED or name == s.human_name:
-        raise Error("nome inválido para o subagente (a-z, 0-9, - ou _)")
+        raise Error("invalid subagent name (a-z, 0-9, - or _)")
     direct = request["admin"] or st["agents_can_spawn"]
-    sp = s.create_spawn(request["who"]["id"], name, folder, prompt, rooms, mode, "aprovado" if direct else "pendente")
+    sp = s.create_spawn(request["who"]["id"], name, folder, prompt, rooms, mode, "approved" if direct else "pending")
     if direct:
         sp = await execute_spawn(app, sp["id"], request["who"])
     else:
         human = s.human()
-        await post_message(app, s.room(rooms[0] if rooms else "geral"), request["who"],
-                           f"@{human['name']} pedido de subagente #{sp['id']}: «{name}» em {folder} "
-                           f"(modo {mode}). Aprove ou recuse na interface (Subagentes).\nPrompt: {prompt[:500]}",
-                           kind="system", meta={"spawn_id": sp["id"]})
+        await post_message(app, s.room(rooms[0]) if rooms else s.general_room(), request["who"],
+                           tr(app, "spawn_request", human=human["name"], id=sp["id"], name=name, folder=folder,
+                              mode=mode, prompt=prompt[:500]), kind="system", meta={"spawn_id": sp["id"]})
     d = s.spawn_dict(sp)
     publish(app, "spawn", d)
     return web.json_response(d)
@@ -504,32 +508,32 @@ async def execute_spawn(app, sid, decided_by):
     s: Store = app["store"]
     st = app["settings"]
     sp = s.get_spawn(sid)
-    recent = s.one("SELECT count(*) c FROM spawns WHERE status='iniciado' AND updated_at > ?",
+    recent = s.one("SELECT count(*) c FROM spawns WHERE status='started' AND updated_at > ?",
                    (_hour_ago(),))["c"]
     if recent >= int(st["max_spawns_per_hour"]):
-        return s.set_spawn(sid, "erro", f"limite de {st['max_spawns_per_hour']} subagentes por hora atingido",
-                           decided_by["id"])
+        return s.set_spawn(sid, "error", tr(app, "spawn_limit", n=st["max_spawns_per_hour"]), decided_by["id"])
     folder = spawn.validate_folder(sp["folder"], st["spawn_roots"])  # re-check: config may have changed
     rooms = json.loads(sp["rooms"])
     requester = s.one("SELECT name FROM agents WHERE id=?", (sp["requested_by"],))["name"]
-    agent, token = s.register_agent(sp["agent_name"], folder, f"Subagente iniciado por {requester}",
+    agent, token = s.register_agent(sp["agent_name"], folder, tr(app, "spawn_by", requester=requester),
                                     spawned_by=sp["requested_by"], rooms=rooms)
     config.save_agent_token(agent["name"], token)
     settings = spawn.hook_settings(agent["name"], app["public_url"], config.home())
     argv = spawn.build_argv(st["claude_bin"], agent["name"], sp["permission_mode"], settings,
-                            spawn.full_prompt(agent["name"], folder, requester, rooms, sp["prompt"]))
+                            spawn.full_prompt(agent["name"], folder, requester, rooms, sp["prompt"],
+                                              st["language"], s.general_room()["name"]))
     ok, out = await asyncio.get_running_loop().run_in_executor(None, spawn.run, argv, folder)
     if not ok:
         if "not trusted" in out:
-            out += ("\n\nA pasta precisa ter sido aberta uma vez no Claude Code com o aviso de confiança aceito "
-                    f"(rode `claude` em {folder}, aceite e saia). Depois tente de novo.")
+            out += "\n\n" + tr(app, "trust_hint", folder=folder)
         s.delete_agent(agent["id"])  # frees the name for a new attempt
         config.agent_token_path(agent["name"]).unlink(missing_ok=True)
-    sp = s.set_spawn(sid, "iniciado" if ok else "erro", out, decided_by["id"])
-    room = s.room(rooms[0] if rooms else "geral")
-    text = (f"Subagente «{agent['name']}» iniciado em {folder} por {requester} (modo {sp['permission_mode']})."
-            if ok else f"Falha ao iniciar o subagente «{agent['name']}» em {folder}: {out[:500]}")
-    await post_message(app, room, s.agent_by_name("sistema"), text, kind="system", meta={"spawn_id": sid})
+    sp = s.set_spawn(sid, "started" if ok else "error", out, decided_by["id"])
+    room = s.room(rooms[0]) if rooms else s.general_room()
+    text = (tr(app, "spawn_started", name=agent["name"], folder=folder, requester=requester,
+               mode=sp["permission_mode"]) if ok
+            else tr(app, "spawn_failed", name=agent["name"], folder=folder, output=out[:500]))
+    await post_message(app, room, s.system(), text, kind="system", meta={"spawn_id": sid})
     publish(app, "agent", {"name": agent["name"]})
     return sp
 
@@ -544,15 +548,15 @@ async def spawns_decide(request):
     s: Store = request.app["store"]
     sid = int(request.match_info["id"])
     sp = s.get_spawn(sid)
-    if sp["status"] != "pendente":
-        raise Error(f"pedido #{sid} não está pendente ({sp['status']})", 409)
+    if sp["status"] != "pending":
+        raise Error(f"request #{sid} is not pending ({sp['status']})", 409)
     if request.match_info["action"] == "approve":
         sp = await execute_spawn(request.app, sid, request["who"])
     else:
-        sp = s.set_spawn(sid, "recusado", decided_by=request["who"]["id"])
+        sp = s.set_spawn(sid, "rejected", decided_by=request["who"]["id"])
         rooms = json.loads(sp["rooms"])
-        await post_message(request.app, s.room(rooms[0] if rooms else "geral"), request["who"],
-                           f"Pedido de subagente #{sid} («{sp['agent_name']}») recusado.", kind="system")
+        await post_message(request.app, s.room(rooms[0]) if rooms else s.general_room(), request["who"],
+                           tr(request.app, "spawn_rejected", id=sid, name=sp["agent_name"]), kind="system")
     d = s.spawn_dict(sp)
     publish(request.app, "spawn", d)
     return web.json_response(d)
@@ -562,6 +566,8 @@ async def settings_get(request):
     st = request.app["settings"]
     return web.json_response({
         "human_name": request.app["store"].human_name,
+        "language": st["language"],
+        "general_room": request.app["store"].general_room()["name"],
         "spawn_roots": st["spawn_roots"],
         "spawn_permission_modes": [m for m in st["spawn_permission_modes"] if m not in spawn.FORBIDDEN_MODES],
         "agents_can_spawn": st["agents_can_spawn"],
@@ -630,7 +636,10 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
         st.update(settings)
     app = web.Application(middlewares=[guard], client_max_size=1 << 20)
     app["settings"] = st
-    app["store"] = Store(db_path or config.home() / "teams.db", st.get("human_name") or "humano")
+    if st.get("language") not in LANGUAGES:
+        st["language"] = "en"
+    app["store"] = Store(db_path or config.home() / "teams.db", st.get("human_name") or "human", st["language"],
+                         st.get("general_room") or "general")
     app["admin_token"] = config.admin_token(create=True)
     app["sessions"] = auth.Sessions(ttl_s=float(st.get("session_ttl_hours", 168)) * 3600,
                                     idle_s=float(st.get("session_idle_hours", 24)) * 3600)
@@ -684,7 +693,7 @@ async def serve(app, hosts, port, retry_s=30):
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     await web.TCPSite(runner, hosts[0], port).start()
-    log.info("escutando em %s:%s", hosts[0], port)
+    log.info("listening on %s:%s", hosts[0], port)
     pending = list(hosts[1:])
 
     async def retry():
@@ -693,9 +702,9 @@ async def serve(app, hosts, port, retry_s=30):
                 try:
                     await web.TCPSite(runner, h, port).start()
                     pending.remove(h)
-                    log.info("escutando em %s:%s", h, port)
+                    log.info("listening on %s:%s", h, port)
                 except OSError as e:
-                    log.warning("não deu para escutar em %s:%s (%s); nova tentativa em %ss", h, port, e, retry_s)
+                    log.warning("could not listen on %s:%s (%s); retrying in %ss", h, port, e, retry_s)
             if pending:
                 await asyncio.sleep(retry_s)
 
@@ -710,33 +719,33 @@ async def serve(app, hosts, port, retry_s=30):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Servidor AgenticTeams")
+    p = argparse.ArgumentParser(description="AgenticTeams server")
     p.add_argument("--host", action="append",
-                   help="endereço para escutar; repita para vários (ex.: --host 127.0.0.1 --host 100.x.y.z). "
-                        "O primeiro precisa funcionar; os outros são tentados de novo a cada 30 s. "
-                        "Padrão: $AT_HOST (separado por vírgula) ou 127.0.0.1")
+                   help="address to listen on; repeat for several (e.g. --host 127.0.0.1 --host 100.x.y.z). "
+                        "The first one must work; the others are retried every 30 s. "
+                        "Default: $AT_HOST (comma-separated) or 127.0.0.1")
     p.add_argument("--port", type=int, default=int(os.environ.get("AT_PORT", 8765)))
-    p.add_argument("--db", help="arquivo SQLite (padrão: $AT_HOME/teams.db)")
+    p.add_argument("--db", help="SQLite file (default: $AT_HOME/teams.db)")
     p.add_argument("--allow-host", action="append", default=[],
-                   help="nome extra aceito no cabeçalho Host (ex.: nome MagicDNS do Tailscale)")
+                   help="extra name accepted in the Host header (e.g. the Tailscale MagicDNS name)")
     p.add_argument("--import-legacy", metavar="ARQUIVO",
-                   help="importa (somente leitura) o agents.txt para a sala 'legado' e sai")
+                   help="import (read-only) an agents.txt into the legacy room and exit")
     a = p.parse_args(argv)
     hosts = a.host or [h.strip() for h in os.environ.get("AT_HOST", "127.0.0.1").split(",") if h.strip()]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     remote = [h for h in hosts if h not in LOCAL_HOSTS]
     if remote:
-        print(f"AVISO: escutando também em {', '.join(remote)}. Acessos de fora do localhost pedem o token "
-              f"de administrador na interface. Veja README (Acesso pela rede).", file=sys.stderr)
+        print(f"NOTE: also listening on {', '.join(remote)}. Anyone who reaches these addresses gets the login "
+              f"page; see README (security model).", file=sys.stderr)
     local = hosts[0] if hosts[0] not in ("0.0.0.0", "::") else "127.0.0.1"
     url = f"http://{local}:{a.port}"
     extra = set(a.allow_host) | {h for h in hosts if h not in ("0.0.0.0", "::")}
     app = make_app(a.db, public_url=os.environ.get("AT_URL") or url, extra_hosts=extra)
     if a.import_legacy:
         n = len(legacy.import_file(app["store"], a.import_legacy))
-        print(f"{n} mensagens importadas de {a.import_legacy} para #legado")
+        print(f"{n} messages imported from {a.import_legacy} into #legacy")
         return 0
-    print(f"AgenticTeams em {', '.join(f'http://{h}:{a.port}' for h in hosts)}  (dados: {config.home()})", flush=True)
+    print(f"AgenticTeams on {', '.join(f'http://{h}:{a.port}' for h in hosts)}  (data: {config.home()})", flush=True)
     asyncio.run(serve(app, hosts, a.port))
     return 0
 

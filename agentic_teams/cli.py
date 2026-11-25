@@ -26,16 +26,18 @@ def short_time(ts):
     return ts[:16].replace("T", " ")
 
 
-def fmt_message(m, show_room=False):
+def fmt_message(m, show_room=False, lang="en"):
+    from .i18n import t
     who = m["author"]
     if m["author_kind"] == "human":
-        who = f"[HUMANO] {who}"
+        who = f"{t(lang, 'human_tag')} {who}"
     elif m["author_kind"] == "system" or m["kind"] == "system":
-        who = f"[sistema] {who}" if m["author_kind"] == "system" else f"{who} [sistema]"
+        tag = t(lang, "system_tag")
+        who = f"{tag} {who}" if m["author_kind"] == "system" else f"{who} {tag}"
     elif m["kind"] == "task":
-        who = f"{who} [tarefa]"
+        who = f"{who} {t(lang, 'task_tag')}"
     room = f"#{m['room']} " if show_room else ""
-    reply = f" (resp. #{m['reply_to']})" if m.get("reply_to") else ""
+    reply = f" (re #{m['reply_to']})" if m.get("reply_to") else ""
     reason = f" <{m['reason']}>" if m.get("reason") else ""
     lines = m["body"].splitlines() or [""]
     head = f"{room}#{m['id']} [{short_time(m['created_at'])}] {who}{reply}{reason}: {lines[0]}"
@@ -43,9 +45,9 @@ def fmt_message(m, show_room=False):
 
 
 def fmt_task(t):
-    to = f"@{t['assignee']}" if t["assignee"] else "sem responsável"
+    to = f"@{t['assignee']}" if t["assignee"] else "unassigned"
     src = f" (msg #{t['source_message_id']})" if t["source_message_id"] else ""
-    return f"#{t['id']} [{t['status']}] #{t['room']} {t['title']} → {to}, criada por {t['creator']}{src}"
+    return f"#{t['id']} [{t['status']}] #{t['room']} {t['title']} → {to}, created by {t['creator']}{src}"
 
 
 def out(args, data, text):
@@ -66,17 +68,17 @@ def read_body(parts):
 def agent_client(args):
     name = resolve_identity(args.as_)
     if not name:
-        sys.exit("at: não sei quem você é. Use --as NOME, AT_AGENT=NOME ou rode 'at install' no projeto.")
+        sys.exit("at: I do not know who you are. Use --as NAME, AT_AGENT=NAME, or run 'at install' in the project.")
     c = Client(agent=name)
     if not c.token:
-        sys.exit(f"at: sem token para '{name}' em {config.agent_token_path(name)}. Rode 'at register {name}'.")
+        sys.exit(f"at: no token for '{name}' in {config.agent_token_path(name)}. Run 'at register {name}'.")
     return c
 
 
 def human_client(args):
     c = Client(admin=True)
     if not c.token:
-        sys.exit(f"at: token de administrador não encontrado em {config.home()}/admin.token (o servidor já subiu?)")
+        sys.exit(f"at: admin token not found in {config.home()}/admin.token (has the server started yet?)")
     return c
 
 
@@ -91,14 +93,14 @@ def cmd_register(args):
     res = c.post("/api/agents", {"name": args.name, "folder": folder, "description": args.desc or "",
                                  "rooms": rooms, "force": args.force})
     config.save_agent_token(res["agent"]["name"], res["token"])
-    out(args, res["agent"], f"registrado: {res['agent']['handle']}  salas: {', '.join(res['agent']['rooms'])}\n"
+    out(args, res["agent"], f"registered: {res['agent']['handle']}  rooms: {', '.join(res['agent']['rooms'])}\n"
                             f"token salvo em {config.agent_token_path(res['agent']['name'])}")
 
 
 def cmd_whoami(args):
     c = client_for(args)
     me = c.get("/api/me")
-    out(args, me, f"{me['handle']} ({me['kind']})  salas: {', '.join(me['rooms']) or '-'}  não lidas: {me['unread']}")
+    out(args, me, f"{me['handle']} ({me['kind']})  rooms: {', '.join(me['rooms']) or '-'}  unread: {me['unread']}")
 
 
 def cmd_agents(args):
@@ -109,7 +111,7 @@ def cmd_agents(args):
         if a["kind"] == "legacy" and not args.all:
             continue
         seen = short_time(a["last_seen"]) if a["last_seen"] else "-"
-        lines.append(f"{a['name']:<20} {a['kind']:<6} visto {seen}  {a['folder'] or ''}  salas: {', '.join(a['rooms'])}")
+        lines.append(f"{a['name']:<20} {a['kind']:<6} seen {seen}  {a['folder'] or ''}  rooms: {', '.join(a['rooms'])}")
     out(args, data, "\n".join(lines))
 
 
@@ -119,9 +121,9 @@ def cmd_rooms(args):
     lines = []
     for r in data:
         members = ", ".join(m["name"] + ("*" if m["notify"] == "all" else "") for m in r["members"])
-        unread = f"  não lidas: {r['unread']}" if r.get("unread") else ""
-        lines.append(f"#{r['name']:<18} [{r['kind']}] {r['title']} — tarefas abertas: {r['open_tasks']}{unread}\n"
-                     f"    membros: {members or '-'}")
+        unread = f"  unread: {r['unread']}" if r.get("unread") else ""
+        lines.append(f"#{r['name']:<18} [{r['kind']}] {r['title']} — open tasks: {r['open_tasks']}{unread}\n"
+                     f"    members: {members or '-'}")
     out(args, data, "\n".join(lines))
 
 
@@ -130,13 +132,13 @@ def cmd_room_create(args):
     members = [m for m in (args.members or "").split(",") if m]
     r = c.post("/api/rooms", {"name": args.name, "title": args.title or args.name, "description": args.desc or "",
                               "kind": args.kind, "members": members})
-    out(args, r, f"sala #{r['name']} criada; membros: {', '.join(m['name'] for m in r['members']) or '-'}")
+    out(args, r, f"room #{r['name']} created; members: {', '.join(m['name'] for m in r['members']) or '-'}")
 
 
 def cmd_join(args):
     c = client_for(args)
     r = c.post(f"/api/rooms/{q(args.room.lstrip('#'))}/join", {"notify": args.notify, "agent": args.agent})
-    out(args, r, f"ok: membro de #{r['name']}")
+    out(args, r, f"ok: member of #{r['name']}")
 
 
 def cmd_leave(args):
@@ -145,9 +147,9 @@ def cmd_leave(args):
     out(args, r, f"ok: saiu de #{r['name']}")
 
 
-FORMAT_HINT = ("dica: mensagem longa numa linha só. A interface renderiza Markdown: use uma linha por item, "
-               "listas e blocos ``` e mande pelo stdin: at say -r <sala> - <<'EOF' ... EOF "
-               "(\\n dentro de aspas não vira quebra de linha).")
+FORMAT_HINT = ("hint: long message on a single line. The UI renders Markdown: use one line per item, "
+               "lists and ``` blocks, and send it through stdin: at say -r <room> - <<'EOF' ... EOF "
+               "(\\n inside quotes is not a line break).")
 
 
 def needs_format_hint(body):
@@ -158,8 +160,8 @@ def cmd_say(args):
     c = client_for(args)
     body = read_body(args.text)
     m = c.post(f"/api/rooms/{q(args.room.lstrip('#'))}/messages", {"body": body, "reply_to": args.reply})
-    out(args, m, f"enviado #{m['id']} em #{m['room']}" +
-        (f" (menciona: {', '.join(m['mentions'])})" if m["mentions"] else ""))
+    out(args, m, f"sent #{m['id']} in #{m['room']}" +
+        (f" (mentions: {', '.join(m['mentions'])})" if m["mentions"] else ""))
     if needs_format_hint(body):
         print(FORMAT_HINT, file=sys.stderr)
 
@@ -169,7 +171,7 @@ def cmd_read(args):
     room = args.room.lstrip("#")
     data = c.get(f"/api/rooms/{q(room)}/messages", limit=args.limit, after=args.after or None,
                  before=args.before or None, mark_read="1" if not args.peek else None)
-    out(args, data, "\n".join(fmt_message(m) for m in data) or f"(sem mensagens em #{room})")
+    out(args, data, "\n".join(fmt_message(m) for m in data) or f"(no messages in #{room})")
 
 
 def cmd_inbox(args):
@@ -177,7 +179,7 @@ def cmd_inbox(args):
     data = c.get("/api/inbox", unread=None if args.all else "1", limit=args.limit,
                  mark_read=None if args.peek else "1")
     items = data["items"]
-    text = "\n".join(fmt_message(m, show_room=True) for m in items) or "(nenhuma mensagem nova para você)"
+    text = "\n".join(fmt_message(m, show_room=True) for m in items) or "(no new messages for you)"
     out(args, data, text)
 
 
@@ -215,7 +217,7 @@ def cmd_task_add(args):
     c = client_for(args)
     t = c.post("/api/tasks", {"room": args.room.lstrip("#"), "title": " ".join(args.title), "body": args.body or "",
                               "assignee": args.to, "source_message_id": args.from_msg})
-    out(args, t, f"tarefa criada: {fmt_task(t)}")
+    out(args, t, f"task created: {fmt_task(t)}")
 
 
 def cmd_task_list(args):
@@ -226,22 +228,21 @@ def cmd_task_list(args):
     elif args.to:
         assignee = args.to
     data = c.get("/api/tasks", room=args.room.lstrip("#") if args.room else None, assignee=assignee,
-                 status=None if args.all else (args.status or "abertas"))
-    out(args, data, "\n".join(fmt_task(t) for t in data) or "(nenhuma tarefa)")
+                 status=None if args.all else (args.status or "open_any"))
+    out(args, data, "\n".join(fmt_task(t) for t in data) or "(no tasks)")
 
 
 def cmd_task_set(args):
     c = client_for(args)
     body = {}
     if args.status:
-        body["status"] = {"done": "feita", "doing": "em_andamento", "open": "aberta", "andamento": "em_andamento",
-                          "cancel": "cancelada"}.get(args.status, args.status)
+        body["status"] = args.status  # the server also accepts doing, cancel and the old Portuguese values
     if args.to is not None:
         body["assignee"] = args.to
     if args.note:
         body["note"] = args.note
     t = c.patch(f"/api/tasks/{args.id}", body)
-    out(args, t, f"tarefa atualizada: {fmt_task(t)}")
+    out(args, t, f"task updated: {fmt_task(t)}")
 
 
 def cmd_spawn(args):
@@ -250,16 +251,16 @@ def cmd_spawn(args):
     prompt = args.prompt if args.prompt != "-" else sys.stdin.read()
     s = c.post("/api/spawns", {"folder": os.path.abspath(args.folder), "name": args.name, "prompt": prompt,
                                "rooms": rooms, "permission_mode": args.mode})
-    msg = {"pendente": "pedido registrado; aguarda aprovação do humano na interface",
-           "iniciado": "sessão iniciada", "erro": "falhou"}.get(s["status"], s["status"])
-    out(args, s, f"subagente #{s['id']} «{s['agent_name']}»: {msg}\n{s['output']}".rstrip())
+    msg = {"pending": "request recorded; waiting for the human's approval in the UI",
+           "started": "session started", "error": "failed"}.get(s["status"], s["status"])
+    out(args, s, f"subagent #{s['id']} «{s['agent_name']}»: {msg}\n{s['output']}".rstrip())
 
 
 def cmd_spawns(args):
     c = client_for(args)
     data = c.get("/api/spawns")
-    out(args, data, "\n".join(f"#{s['id']} [{s['status']}] {s['agent_name']} em {s['folder']} "
-                              f"(por {s['requested_by']}, {short_time(s['created_at'])})" for s in data) or "(nenhum)")
+    out(args, data, "\n".join(f"#{s['id']} [{s['status']}] {s['agent_name']} in {s['folder']} "
+                              f"(by {s['requested_by']}, {short_time(s['created_at'])})" for s in data) or "(none)")
 
 
 def cmd_spawn_decide(args):
@@ -298,7 +299,7 @@ def _git_exclude(project, patterns):
         path = subprocess.run(["git", "-C", str(project), "rev-parse", "--git-path", "info/exclude"],
                               capture_output=True, text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
-        return "não é repositório git"
+        return "not a git repository"
     path = Path(path) if os.path.isabs(path) else Path(project) / path
     path.parent.mkdir(parents=True, exist_ok=True)
     cur = path.read_text() if path.exists() else ""
@@ -306,13 +307,13 @@ def _git_exclude(project, patterns):
     if add:
         with open(path, "a") as f:
             f.write(("" if cur.endswith("\n") or not cur else "\n") + "\n".join(add) + "\n")
-    return f"{path} ({'adicionado' if add else 'já estava'})"
+    return f"{path} ({'added' if add else 'already there'})"
 
 
 def slug(text):
     s = re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-_")
     s = re.sub(r"-{2,}", "-", s)[:40].strip("-_")
-    return s if len(s) >= 2 else f"agente-{s or 'x'}"
+    return s if len(s) >= 2 else f"agent-{s or 'x'}"
 
 
 def pick_name(client, project):
@@ -322,7 +323,7 @@ def pick_name(client, project):
     for a in agents:
         if a["kind"] == "agent" and a["folder"] == str(project):
             return a["name"]
-    taken = {a["name"] for a in agents} | {"todos", "sala", "all", "here", "sistema", "system", "admin"}
+    taken = {a["name"] for a in agents} | {"all", "here", "todos", "sala", "system", "sistema", "admin"}
     base = slug(project.name)
     name, i = base, 2
     while name in taken:
@@ -362,8 +363,8 @@ def cmd_install(args):
         legacy = [h["command"] for e in hooks.get("Stop", []) for h in e.get("hooks", [])
                   if "agents_watch.py" in h.get("command", "")]
         if legacy:
-            summary["aviso"] = ("o hook antigo do agents.txt continua ativo (os dois convivem). "
-                                "Para desarmar: python3 ~/.claude/skills/agents-txt/scripts/setup.py --remove")
+            summary["warning"] = ("an old agents.txt hook is still active (both run side by side). "
+                                  "To remove it: python3 ~/.claude/skills/agents-txt/scripts/setup.py --remove")
         if not args.dry_run:
             c = human_client(args)
             rooms = [r for r in (args.rooms or "").split(",") if r]
@@ -372,8 +373,8 @@ def cmd_install(args):
             config.save_agent_token(res["agent"]["name"], res["token"])
             ident.parent.mkdir(parents=True, exist_ok=True)
             ident.write_text(json.dumps({"name": res["agent"]["name"], "url": config.server_url()}, indent=2) + "\n")
-            summary["agente"] = res["agent"]["handle"]
-            summary["salas"] = res["agent"]["rooms"]
+            summary["agent"] = res["agent"]["handle"]
+            summary["rooms"] = res["agent"]["rooms"]
         summary["hook"] = hook["command"]
     if args.dry_run:
         print(json.dumps(cfg, indent=2, ensure_ascii=False))
@@ -384,32 +385,32 @@ def cmd_install(args):
     tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
     os.replace(tmp, cfg_path)
     json.loads(cfg_path.read_text())
-    summary["settings"] = f"{cfg_path} (JSON válido)"
+    summary["settings"] = f"{cfg_path} (valid JSON)"
     summary["git"] = _git_exclude(project, [".claude/settings.local.json", PROJECT_FILE])
     if not args.remove:
-        summary["próximo passo"] = "abra /hooks uma vez (ou reinicie a sessão) para o Claude Code carregar o hook"
+        summary["next step"] = "open /hooks once (or restart the session) so Claude Code loads the hook"
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
 # --------------------------------------------------------------------------- parser
 def build_parser():
-    p = argparse.ArgumentParser(prog="at", description="AgenticTeams: chat entre agentes Claude Code")
-    p.add_argument("--as", dest="as_", metavar="NOME", help="agir como este agente (padrão: $AT_AGENT ou o projeto)")
-    p.add_argument("--human", action="store_true", help="agir como o usuário humano (token de administrador)")
-    p.add_argument("--json", action="store_true", help="saída em JSON")
+    p = argparse.ArgumentParser(prog="at", description="AgenticTeams: chat between Claude Code agents")
+    p.add_argument("--as", dest="as_", metavar="NAME", help="act as this agent (default: $AT_AGENT or the project)")
+    p.add_argument("--human", action="store_true", help="act as the human user (admin token)")
+    p.add_argument("--json", action="store_true", help="JSON output")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("register", help="registra (ou renova o token de) um agente")
+    s = sub.add_parser("register", help="register an agent (or renew its token)")
     s.add_argument("name")
-    s.add_argument("--folder", help="pasta do projeto (padrão: raiz git do diretório atual)")
+    s.add_argument("--folder", help="project folder (default: git root of the current directory)")
     s.add_argument("--desc")
-    s.add_argument("--rooms", help="salas extras, separadas por vírgula (geral é automática)")
-    s.add_argument("--force", action="store_true", help="aceita nome já usado por outra pasta")
+    s.add_argument("--rooms", help="extra rooms, comma-separated (the general room is automatic)")
+    s.add_argument("--force", action="store_true", help="accept a name already used by another folder")
     s.set_defaults(fn=cmd_register)
 
-    s = sub.add_parser("install", help="registra o agente do projeto e arma o hook (nome automático pela pasta)")
-    s.add_argument("--project-dir", default=None, help="padrão: raiz git do diretório atual")
-    s.add_argument("--name", help="padrão: o já registrado para a pasta, ou o nome da pasta")
+    s = sub.add_parser("install", help="register the project's agent and set up the hook (name taken from the folder)")
+    s.add_argument("--project-dir", default=None, help="default: git root of the current directory")
+    s.add_argument("--name", help="default: the one already registered for the folder, or the folder name")
     s.add_argument("--desc")
     s.add_argument("--rooms")
     s.add_argument("--force", action="store_true")
@@ -422,111 +423,111 @@ def build_parser():
     s.add_argument("--all", action="store_true", help="inclui autores importados do agents.txt")
     s.set_defaults(fn=cmd_agents)
 
-    s = sub.add_parser("rooms", help="lista as salas")
+    s = sub.add_parser("rooms", help="list rooms")
     s.add_argument("--mine", action="store_true")
     s.set_defaults(fn=cmd_rooms)
-    s = sub.add_parser("room", help="cria uma sala")
+    s = sub.add_parser("room", help="create a room")
     rs = s.add_subparsers(dest="room_cmd", required=True)
     c = rs.add_parser("create")
     c.add_argument("name")
     c.add_argument("--title")
     c.add_argument("--desc")
-    c.add_argument("--kind", default="projeto", choices=["projeto", "tema", "geral"])
-    c.add_argument("--members", help="agentes, separados por vírgula")
+    c.add_argument("--kind", default="project", choices=["project", "topic"])
+    c.add_argument("--members", help="agents, comma-separated")
     c.set_defaults(fn=cmd_room_create)
 
-    s = sub.add_parser("join", help="entra numa sala (ou muda o modo de notificação)")
+    s = sub.add_parser("join", help="join a room (or change the notification mode)")
     s.add_argument("room")
     s.add_argument("--notify", choices=["mentions", "all", "none"])
-    s.add_argument("--agent", help="(humano) adiciona outro agente")
+    s.add_argument("--agent", help="(human) add another agent")
     s.set_defaults(fn=cmd_join)
     s = sub.add_parser("leave")
     s.add_argument("room")
     s.add_argument("--agent")
     s.set_defaults(fn=cmd_leave)
 
-    s = sub.add_parser("say", help="envia mensagem (use @nome para mencionar, @todos para a sala)")
-    s.add_argument("--room", "-r", default="geral")
-    s.add_argument("--reply", type=int, help="id da mensagem respondida")
-    s.add_argument("text", nargs="*", help="texto; '-' ou vazio lê do stdin (multilinha)")
+    s = sub.add_parser("say", help="send a message (Markdown; @name mentions, @all wakes the room)")
+    s.add_argument("--room", "-r", default="general")
+    s.add_argument("--reply", type=int, help="id of the message you are answering")
+    s.add_argument("text", nargs="*", help="text; '-' or empty reads stdin (multi-line)")
     s.set_defaults(fn=cmd_say)
 
-    s = sub.add_parser("read", help="histórico de uma sala")
-    s.add_argument("room", nargs="?", default="geral")
+    s = sub.add_parser("read", help="room history")
+    s.add_argument("room", nargs="?", default="general")
     s.add_argument("--limit", "-n", type=int, default=30)
-    s.add_argument("--after", type=int, help="só mensagens depois deste id")
-    s.add_argument("--before", type=int, help="só mensagens antes deste id (o contexto de uma menção)")
-    s.add_argument("--peek", action="store_true", help="não marca como lidas")
+    s.add_argument("--after", type=int, help="only messages after this id")
+    s.add_argument("--before", type=int, help="only messages before this id (the context of a mention)")
+    s.add_argument("--peek", action="store_true", help="do not mark as read")
     s.set_defaults(fn=cmd_read)
 
-    s = sub.add_parser("history", help="navega no histórico: conversa com alguém, de um autor, por texto...")
-    s.add_argument("--with", dest="with_", metavar="NOME", help="conversa entre você e NOME, em todas as salas")
-    s.add_argument("--from", dest="from_", metavar="NOME", help="só mensagens de NOME")
+    s = sub.add_parser("history", help="browse history: conversation with someone, by author, by text...")
+    s.add_argument("--with", dest="with_", metavar="NAME", help="conversation between you and NAME, in every room")
+    s.add_argument("--from", dest="from_", metavar="NAME", help="only messages by NAME")
     s.add_argument("--room", "-r")
-    s.add_argument("--text", "-t", help="contém este texto")
+    s.add_argument("--text", "-t", help="contains this text")
     s.add_argument("--before", type=int)
     s.add_argument("--after", type=int)
-    s.add_argument("--days", type=float, help="só dos últimos N dias")
+    s.add_argument("--days", type=float, help="only from the last N days")
     s.add_argument("--limit", "-n", type=int, default=30)
     s.set_defaults(fn=cmd_history)
 
-    s = sub.add_parser("thread", help="cadeia de respostas de uma mensagem (acima e abaixo dela)")
+    s = sub.add_parser("thread", help="reply chain of a message (above and below it)")
     s.add_argument("id", type=int)
     s.set_defaults(fn=cmd_thread)
 
-    s = sub.add_parser("inbox", help="mensagens para você (não lidas) e marca como lidas")
-    s.add_argument("--all", action="store_true", help="inclui as já lidas")
-    s.add_argument("--peek", action="store_true", help="não marca como lidas")
+    s = sub.add_parser("inbox", help="messages for you (unread), and mark them read")
+    s.add_argument("--all", action="store_true", help="include read ones")
+    s.add_argument("--peek", action="store_true", help="do not mark as read")
     s.add_argument("--limit", "-n", type=int, default=50)
     s.set_defaults(fn=cmd_inbox)
 
-    s = sub.add_parser("show", help="mostra uma mensagem pelo id")
+    s = sub.add_parser("show", help="show a message by id")
     s.add_argument("id", type=int)
     s.set_defaults(fn=cmd_show)
 
-    s = sub.add_parser("search", help="busca texto em todas as salas")
+    s = sub.add_parser("search", help="search text in every room")
     s.add_argument("text", nargs="+")
     s.add_argument("--limit", type=int, default=30)
     s.set_defaults(fn=cmd_search)
 
-    s = sub.add_parser("task", help="tarefas")
+    s = sub.add_parser("task", help="tasks")
     ts = s.add_subparsers(dest="task_cmd", required=True)
-    c = ts.add_parser("add", help="cria tarefa")
+    c = ts.add_parser("add", help="create a task")
     c.add_argument("title", nargs="+")
-    c.add_argument("--room", "-r", default="geral")
-    c.add_argument("--to", help="responsável")
+    c.add_argument("--room", "-r", default="general")
+    c.add_argument("--to", help="assignee")
     c.add_argument("--body")
-    c.add_argument("--from-msg", type=int, help="id da mensagem de origem")
+    c.add_argument("--from-msg", type=int, help="id of the message the task comes from")
     c.set_defaults(fn=cmd_task_add)
-    c = ts.add_parser("list", help="lista tarefas (padrão: abertas)")
+    c = ts.add_parser("list", help="list tasks (default: open ones)")
     c.add_argument("--room", "-r")
     c.add_argument("--mine", action="store_true")
     c.add_argument("--to")
-    c.add_argument("--status", choices=["aberta", "em_andamento", "feita", "cancelada", "abertas"])
+    c.add_argument("--status", choices=["open", "in_progress", "done", "cancelled", "open_any"])
     c.add_argument("--all", action="store_true")
     c.set_defaults(fn=cmd_task_list)
-    c = ts.add_parser("set", help="muda status/responsável: at task set 3 feita")
+    c = ts.add_parser("set", help="change status/assignee: at task set 3 done")
     c.add_argument("id", type=int)
     c.add_argument("status", nargs="?",
-                   help="aberta | em_andamento | feita | cancelada (atalhos: open, doing, done, cancel)")
-    c.add_argument("--to", help="novo responsável ('' para nenhum)")
-    c.add_argument("--note", help="comentário postado na sala")
+                   help="open | in_progress | done | cancelled (shortcuts: doing, cancel)")
+    c.add_argument("--to", help="new assignee ('' for none)")
+    c.add_argument("--note", help="comment posted in the room")
     c.set_defaults(fn=cmd_task_set)
 
-    s = sub.add_parser("spawn", help="inicia (ou pede) um subagente claude --bg numa pasta")
+    s = sub.add_parser("spawn", help="start (or request) a claude --bg subagent in a folder")
     s.add_argument("--folder", required=True)
     s.add_argument("--name", required=True)
-    s.add_argument("--prompt", required=True, help="tarefa do subagente ('-' lê do stdin)")
+    s.add_argument("--prompt", required=True, help="the subagent's task ('-' reads stdin)")
     s.add_argument("--rooms")
-    s.add_argument("--mode", help="modo de permissão (veja /api/settings)")
+    s.add_argument("--mode", help="permission mode (see /api/settings)")
     s.set_defaults(fn=cmd_spawn)
-    sub.add_parser("spawns", help="lista pedidos de subagentes").set_defaults(fn=cmd_spawns)
+    sub.add_parser("spawns", help="list subagent requests").set_defaults(fn=cmd_spawns)
     for name in ("approve", "reject"):
-        s = sub.add_parser(name, help=f"(humano) {'aprova' if name == 'approve' else 'recusa'} um pedido de subagente")
+        s = sub.add_parser(name, help=f"(human) {name} a subagent request")
         s.add_argument("id", type=int)
         s.set_defaults(fn=cmd_spawn_decide)
 
-    s = sub.add_parser("watch", help="vigia usado pelo hook do Claude Code")
+    s = sub.add_parser("watch", help="watcher used by the Claude Code hook")
     s.add_argument("name", nargs="?")
     s.set_defaults(fn=cmd_watch)
     return p

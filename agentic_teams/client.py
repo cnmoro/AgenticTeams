@@ -91,7 +91,7 @@ class Client:
                 msg = str(e)
             raise ApiError(msg, e.code) from None
         except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
-            raise ApiError(f"servidor AgenticTeams indisponível em {self.url} ({e})", 0) from None
+            raise ApiError(f"AgenticTeams server unavailable at {self.url} ({e})", 0) from None
 
     def get(self, path, **params):
         timeout = params.pop("_timeout", 30)

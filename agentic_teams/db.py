@@ -13,11 +13,18 @@ from datetime import datetime
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,39}$")
 MENTION_RE = re.compile(r"(?<![\w@/.])@([a-z0-9][a-z0-9_-]{1,39})", re.IGNORECASE)
-ROOM_WIDE = {"todos", "sala", "all", "here"}
-RESERVED = ROOM_WIDE | {"sistema", "system", "admin"}
-TASK_STATUS = ("aberta", "em_andamento", "feita", "cancelada")
+ROOM_WIDE = {"all", "here", "todos", "sala"}
+RESERVED = ROOM_WIDE | {"system", "sistema", "admin"}
+TASK_STATUS = ("open", "in_progress", "done", "cancelled")
 NOTIFY_MODES = ("mentions", "all", "none")
-ROOM_KINDS = ("geral", "projeto", "tema", "legado")
+ROOM_KINDS = ("general", "project", "topic", "legacy")
+# Portuguese values from older versions, still accepted on input (and migrated in the database).
+STATUS_ALIASES = {"aberta": "open", "em_andamento": "in_progress", "andamento": "in_progress", "doing": "in_progress",
+                  "feita": "done", "cancelada": "cancelled", "cancel": "cancelled", "canceled": "cancelled"}
+KIND_ALIASES = {"geral": "general", "projeto": "project", "tema": "topic", "legado": "legacy"}
+SPAWN_STATUS_ALIASES = {"pendente": "pending", "aprovado": "approved", "iniciado": "started", "erro": "error",
+                        "recusado": "rejected"}
+OPEN_ANY = ("open_any", "abertas", "open-any")
 # A reply chain between the same two agents wakes up to this many messages in total; after that only @mentions wake.
 MAX_REPLY_CHAIN = 6
 ACK_RE = re.compile(
@@ -49,7 +56,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     name TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
-    kind TEXT NOT NULL DEFAULT 'projeto',
+    kind TEXT NOT NULL DEFAULT 'project',
     created_by INTEGER REFERENCES agents(id),
     created_at TEXT NOT NULL,
     archived INTEGER NOT NULL DEFAULT 0
@@ -91,7 +98,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     room_id INTEGER NOT NULL REFERENCES rooms(id),
     title TEXT NOT NULL,
     body TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'aberta',
+    status TEXT NOT NULL DEFAULT 'open',
     assignee_id INTEGER REFERENCES agents(id),
     creator_id INTEGER NOT NULL REFERENCES agents(id),
     source_message_id INTEGER REFERENCES messages(id),
@@ -106,7 +113,7 @@ CREATE TABLE IF NOT EXISTS spawns (
     prompt TEXT NOT NULL,
     rooms TEXT NOT NULL DEFAULT '[]',
     permission_mode TEXT NOT NULL,
-    status TEXT NOT NULL,                         -- pendente | iniciado | erro | recusado
+    status TEXT NOT NULL,                         -- pending | approved | started | error | rejected
     output TEXT NOT NULL DEFAULT '',
     decided_by INTEGER REFERENCES agents(id),
     created_at TEXT NOT NULL,
@@ -133,14 +140,18 @@ def hash_token(token: str) -> str:
 
 
 class Store:
-    def __init__(self, path, human_name="humano"):
+    def __init__(self, path, human_name="human", lang="en", general_room="general"):
         self.db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
         self.lock = threading.RLock()
-        self.human_name = human_name
+        self.lang = lang
+        self.general_name = general_room
+        self._migrate()
+        h = self.one("SELECT name FROM agents WHERE kind='human' ORDER BY id LIMIT 1")
+        self.human_name = h["name"] if h else human_name  # an existing install keeps its human's name
         self._bootstrap()
 
     # ------------------------------------------------------------------ helpers
@@ -180,16 +191,34 @@ class Store:
         self.x("INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                (key, str(value)))
 
+    def _migrate(self):
+        """Older versions stored Portuguese values; move them to the English ones (idempotent)."""
+        with self.lock:
+            for old, new in KIND_ALIASES.items():
+                self.db.execute("UPDATE rooms SET kind=? WHERE kind=?", (new, old))
+            for old, new in STATUS_ALIASES.items():
+                self.db.execute("UPDATE tasks SET status=? WHERE status=?", (new, old))
+            for old, new in SPAWN_STATUS_ALIASES.items():
+                self.db.execute("UPDATE spawns SET status=? WHERE status=?", (new, old))
+            self.db.execute("UPDATE notifications SET reason='human' WHERE reason='humano'")
+
     def _bootstrap(self):
-        if not self.agent_by_name("sistema"):
-            self.x("INSERT INTO agents(name,kind,description,created_at) VALUES('sistema','system','Avisos automáticos',?)",
-                   (now(),))
+        from .i18n import t
+        if not self.one("SELECT 1 FROM agents WHERE kind='system'"):
+            self.x("INSERT INTO agents(name,kind,description,created_at) VALUES('system','system',?,?)",
+                   (t(self.lang, "system_desc"), now()))
         if not self.agent_by_name(self.human_name):
-            self.x("INSERT INTO agents(name,kind,description,created_at) VALUES(?,'human','Usuário humano (interface web)',?)",
-                   (self.human_name, now()))
-        if not self.room_by_name("geral"):
-            self.create_room("geral", "Geral", "Coordenação de recursos compartilhados: VPN, servidores, deploys, disco.",
-                             "geral", None)
+            self.x("INSERT INTO agents(name,kind,description,created_at) VALUES(?,'human',?,?)",
+                   (self.human_name, t(self.lang, "human_desc"), now()))
+        if not self.one("SELECT 1 FROM rooms WHERE kind='general'"):
+            self.create_room(self.general_name, t(self.lang, "general_title"), t(self.lang, "general_desc"),
+                             "general", None)
+
+    def system(self):
+        return self.one("SELECT * FROM agents WHERE kind='system' ORDER BY id LIMIT 1")
+
+    def general_room(self):
+        return self.one("SELECT * FROM rooms WHERE kind='general' ORDER BY id LIMIT 1")
 
     # ------------------------------------------------------------------ agents
     def agent_by_name(self, name):
@@ -205,15 +234,15 @@ class Store:
         """Create (or re-key) an agent. Returns (agent_row, token)."""
         name = (name or "").strip().lower()
         if not NAME_RE.match(name):
-            raise Error("nome inválido: use 2-40 caracteres a-z, 0-9, - ou _, começando por letra ou número")
+            raise Error("invalid name: use 2-40 characters a-z, 0-9, - or _, starting with a letter or digit")
         if name in RESERVED or name == self.human_name:
-            raise Error(f"nome reservado: {name}")
+            raise Error(f"reserved name: {name}")
         for r in rooms:
             self.room(r)
         token = secrets.token_urlsafe(24)
         ex = self.agent_by_name(name)
         if ex and ex["kind"] != "agent":
-            raise Error(f"nome já usado por um participante do tipo {ex['kind']}", 409)
+            raise Error(f"name already used by a participant of kind {ex['kind']}", 409)
         if ex:
             self.x("UPDATE agents SET folder=?, description=COALESCE(NULLIF(?,''),description), token_hash=?, last_seen=? "
                    "WHERE id=?", (folder, description, hash_token(token), now(), ex["id"]))
@@ -222,7 +251,8 @@ class Store:
                    "VALUES(?,?,?,?,?,?,?,?)",
                    (name, "agent", folder, description, hash_token(token), spawned_by, now(), now()))
         agent = self.agent_by_name(name)
-        for r in ["geral", *rooms]:
+        self.join(self.general_room()["id"], agent["id"])
+        for r in rooms:
             self.join(self.room(r)["id"], agent["id"])
         return agent, token
 
@@ -230,7 +260,7 @@ class Store:
         """Remove an agent that never took part (used when a spawn fails)."""
         with self.tx():
             if self.db.execute("SELECT 1 FROM messages WHERE author_id=? LIMIT 1", (agent_id,)).fetchone():
-                raise Error("agente já tem mensagens; não pode ser removido", 409)
+                raise Error("the agent already has messages; it cannot be removed", 409)
             for table in ("members", "notifications", "mentions"):
                 self.db.execute(f"DELETE FROM {table} WHERE agent_id=?", (agent_id,))
             self.db.execute("DELETE FROM agents WHERE id=?", (agent_id,))
@@ -257,7 +287,7 @@ class Store:
         a = self.agent_by_name(name)
         if a:
             return a
-        self.x("INSERT INTO agents(name,kind,description,created_at) VALUES(?,'legacy','Autor importado do agents.txt',?)",
+        self.x("INSERT INTO agents(name,kind,description,created_at) VALUES(?,'legacy','Author imported from agents.txt',?)",
                (name, now()))
         return self.agent_by_name(name)
 
@@ -266,24 +296,30 @@ class Store:
         return self.one("SELECT * FROM rooms WHERE name=?", (name,))
 
     def room(self, name):
-        r = self.room_by_name((name or "").lstrip("#").lower())
+        key = (name or "").lstrip("#").lower()
+        r = self.room_by_name(key)
+        if not r and key in ("general", "geral"):  # the default room, whatever this install named it
+            r = self.general_room()
+        if not r and key in ("legacy", "legado"):
+            r = self.one("SELECT * FROM rooms WHERE kind='legacy' ORDER BY id LIMIT 1")
         if not r:
-            raise Error(f"sala não encontrada: {name}", 404)
+            raise Error(f"room not found: {name}", 404)
         return r
 
     def create_room(self, name, title, description, kind, creator_id, members=()):
         name = (name or "").strip().lstrip("#").lower()
+        kind = KIND_ALIASES.get(kind, kind)
         if not NAME_RE.match(name):
-            raise Error("nome de sala inválido: use 2-40 caracteres a-z, 0-9, - ou _")
+            raise Error("invalid room name: use 2-40 characters a-z, 0-9, - or _")
         if kind not in ROOM_KINDS:
-            raise Error(f"tipo de sala inválido: {kind} (use {', '.join(ROOM_KINDS)})")
+            raise Error(f"invalid room kind: {kind} (use {', '.join(ROOM_KINDS)})")
         if self.room_by_name(name):
-            raise Error(f"sala já existe: {name}", 409)
+            raise Error(f"room already exists: {name}", 409)
         ids = []
         for m in members:
             a = self.agent_by_name(m.lstrip("@").lower())
             if not a:
-                raise Error(f"agente não encontrado: {m}", 404)
+                raise Error(f"agent not found: {m}", 404)
             ids.append(a["id"])
         self.x("INSERT INTO rooms(name,title,description,kind,created_by,created_at) VALUES(?,?,?,?,?,?)",
                (name, title or name, description or "", kind, creator_id, now()))
@@ -298,7 +334,7 @@ class Store:
 
     def join(self, room_id, agent_id, notify=None):
         if notify is not None and notify not in NOTIFY_MODES:
-            raise Error(f"notify inválido: {notify} (use {', '.join(NOTIFY_MODES)})")
+            raise Error(f"invalid notify mode: {notify} (use {', '.join(NOTIFY_MODES)})")
         ex = self.one("SELECT * FROM members WHERE room_id=? AND agent_id=?", (room_id, agent_id))
         if ex:
             if notify:
@@ -319,7 +355,7 @@ class Store:
         d = {"id": r["id"], "name": r["name"], "title": r["title"], "description": r["description"],
              "kind": r["kind"], "created_at": r["created_at"], "members": members,
              "last_message_id": last["id"] if last else 0, "last_message_at": last["created_at"] if last else None,
-             "open_tasks": self.one("SELECT count(*) c FROM tasks WHERE room_id=? AND status IN ('aberta','em_andamento')",
+             "open_tasks": self.one("SELECT count(*) c FROM tasks WHERE room_id=? AND status IN ('open','in_progress')",
                                     (r["id"],))["c"]}
         if for_agent is not None:
             d["unread"] = self.one(
@@ -330,9 +366,9 @@ class Store:
     def list_rooms(self, for_agent=None, only_member=False):
         if only_member and for_agent:
             rows = self.q("SELECT r.* FROM rooms r JOIN members m ON m.room_id=r.id WHERE m.agent_id=? "
-                          "AND r.archived=0 ORDER BY r.kind='geral' DESC, r.name", (for_agent,))
+                          "AND r.archived=0 ORDER BY r.kind='general' DESC, r.name", (for_agent,))
         else:
-            rows = self.q("SELECT * FROM rooms WHERE archived=0 ORDER BY kind='geral' DESC, kind='legado', name")
+            rows = self.q("SELECT * FROM rooms WHERE archived=0 ORDER BY kind='general' DESC, kind='legacy', name")
         return [self.room_dict(r, for_agent) for r in rows]
 
     # ------------------------------------------------------------------ messages
@@ -348,7 +384,7 @@ class Store:
     def get_message(self, mid):
         m = self.one("SELECT * FROM messages WHERE id=?", (mid,))
         if not m:
-            raise Error(f"mensagem não encontrada: {mid}", 404)
+            raise Error(f"message not found: {mid}", 404)
         return m
 
     def messages(self, room_id, after=0, before=None, limit=100):
@@ -382,7 +418,7 @@ class Store:
         """Flexible history lookup, newest `limit` matches returned oldest first.
 
         with_id: the conversation between `me_id` and that participant, in any room: messages by
-        them that reached me (mention, reply, @todos, human message in my room...) and my messages
+        them that reached me (mention, reply, @all, human message in my room...) and my messages
         that mention them or reply to them.
         """
         sql, args = "SELECT m.* FROM messages m WHERE m.kind != 'legacy'", []
@@ -424,9 +460,9 @@ class Store:
         - agents mentioned by name, even outside the room (reason 'mention', or 'cross' if not a member);
         - the author of the message being replied to (reason 'reply'), unless the reply chain between
           the same two agents is already MAX_REPLY_CHAIN long;
-        - @todos / @sala: every member of the room (reason 'room');
+        - @all / @here (or @todos / @sala): every member of the room (reason 'room');
         - members with notify='all' (reason 'all');
-        - a message from the human without mentions notifies every member (reason 'humano').
+        - a message from the human without mentions notifies every member (reason 'human').
         Members with notify='none' only get explicit name mentions.
         A message from an agent that only acknowledges ("ok", "obrigado"...) wakes nobody: that is what
         keeps two agents from thanking each other forever.
@@ -434,9 +470,9 @@ class Store:
         """
         body = (body or "").strip()
         if not body:
-            raise Error("mensagem vazia")
+            raise Error("empty message")
         if len(body) > 20000:
-            raise Error("mensagem longa demais (máx. 20000 caracteres)")
+            raise Error("message too long (max. 20000 characters)")
         if reply_to:
             self.get_message(reply_to)
         with self.tx():
@@ -469,7 +505,7 @@ class Store:
                     if room_wide:
                         targets.setdefault(aid, "room")
                     elif human_plain:
-                        targets.setdefault(aid, "humano")
+                        targets.setdefault(aid, "human")
                     elif mode == "all":
                         targets.setdefault(aid, "all")
                 targets.pop(author["id"], None)
@@ -543,7 +579,7 @@ class Store:
     def get_task(self, tid):
         t = self.one("SELECT * FROM tasks WHERE id=?", (tid,))
         if not t:
-            raise Error(f"tarefa não encontrada: {tid}", 404)
+            raise Error(f"task not found: {tid}", 404)
         return t
 
     def _assignee_id(self, name):
@@ -551,26 +587,28 @@ class Store:
             return None
         a = self.agent_by_name(name.lstrip("@").lower())
         if not a or a["kind"] not in ("agent", "human"):
-            raise Error(f"agente não encontrado: {name}", 404)
+            raise Error(f"agent not found: {name}", 404)
         return a["id"]
 
     def create_task(self, room_id, creator, title, body="", assignee=None, source_message_id=None):
         title = (title or "").strip()
         if not title:
-            raise Error("tarefa sem título")
+            raise Error("a task needs a title")
         if source_message_id:
             self.get_message(source_message_id)
         aid = self._assignee_id(assignee)
         ts = now()
         cur = self.x("INSERT INTO tasks(room_id,title,body,status,assignee_id,creator_id,source_message_id,created_at,"
                      "updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                     (room_id, title, body or "", "aberta", aid, creator["id"], source_message_id, ts, ts))
+                     (room_id, title, body or "", "open", aid, creator["id"], source_message_id, ts, ts))
         return self.get_task(cur.lastrowid)
 
     def update_task(self, tid, status=None, assignee=None, title=None, body=None):
         t = self.get_task(tid)
+        if status is not None:
+            status = STATUS_ALIASES.get(status, status)
         if status is not None and status not in TASK_STATUS:
-            raise Error(f"status inválido: {status} (use {', '.join(TASK_STATUS)})")
+            raise Error(f"invalid status: {status} (use {', '.join(TASK_STATUS)})")
         fields, args = [], []
         if status is not None:
             fields.append("status=?")
@@ -585,7 +623,7 @@ class Store:
             fields.append("body=?")
             args.append(body)
         if not fields:
-            raise Error("nada para alterar")
+            raise Error("nothing to change")
         fields.append("updated_at=?")
         args.append(now())
         self.x(f"UPDATE tasks SET {', '.join(fields)} WHERE id=?", (*args, t["id"]))
@@ -599,12 +637,13 @@ class Store:
         if assignee_id:
             sql += " AND assignee_id=?"
             args.append(assignee_id)
-        if status == "abertas":
-            sql += " AND status IN ('aberta','em_andamento')"
+        status = STATUS_ALIASES.get(status, status)
+        if status in OPEN_ANY:
+            sql += " AND status IN ('open','in_progress')"
         elif status:
             sql += " AND status=?"
             args.append(status)
-        sql += " ORDER BY status='feita', status='cancelada', id DESC"
+        sql += " ORDER BY status='done', status='cancelled', id DESC"
         return [self.task_dict(t) for t in self.q(sql, args)]
 
     # ------------------------------------------------------------------ spawns
@@ -618,7 +657,7 @@ class Store:
     def get_spawn(self, sid):
         s = self.one("SELECT * FROM spawns WHERE id=?", (sid,))
         if not s:
-            raise Error(f"pedido de subagente não encontrado: {sid}", 404)
+            raise Error(f"subagent request not found: {sid}", 404)
         return s
 
     def create_spawn(self, requested_by, agent_name, folder, prompt, rooms, mode, status):

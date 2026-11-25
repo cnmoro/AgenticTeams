@@ -181,37 +181,37 @@ def main(argv=None):
     import argparse
     import getpass
     import sys
-    p = argparse.ArgumentParser(prog="at-user", description="Logins da interface web do AgenticTeams")
+    p = argparse.ArgumentParser(prog="at-user", description="AgenticTeams web UI logins")
     p.add_argument("--remove", metavar="EMAIL")
-    p.add_argument("--copy-from", metavar="USERS_JSON", help="copia o hash de outro users.json (ex.: do claude-manager)")
+    p.add_argument("--copy-from", metavar="USERS_JSON", help="copy the hash from another users.json (e.g. claude-manager's)")
     p.add_argument("email", nargs="?")
     a = p.parse_args(argv)
     users = dict(load_users())
     if a.remove:
         if users.pop(normalize(a.remove), None) is None:
-            sys.exit(f"não existe: {a.remove}")
+            sys.exit(f"no such login: {a.remove}")
         save_users(users)
-        print(f"removido: {normalize(a.remove)}")
+        print(f"removed: {normalize(a.remove)}")
         return 0
     if a.copy_from:
         src = json.loads(open(a.copy_from).read())
         key = normalize(a.email)
         if key not in src:
-            sys.exit(f"{key} não está em {a.copy_from}")
+            sys.exit(f"{key} is not in {a.copy_from}")
         users[key] = src[key]
         save_users(users)
-        print(f"login {key} copiado de {a.copy_from} para {users_file()}")
+        print(f"login {key} copied from {a.copy_from} to {users_file()}")
         return 0
     if sys.stdin.isatty():
-        email = a.email or input("E-mail: ")
-        pw = getpass.getpass("Senha (mín. 12): ")
-        if getpass.getpass("Repita: ") != pw:
-            sys.exit("as senhas não conferem")
+        email = a.email or input("Email: ")
+        pw = getpass.getpass("Password (min. 12): ")
+        if getpass.getpass("Again: ") != pw:
+            sys.exit("the passwords do not match")
     else:
         lines = sys.stdin.read().splitlines() + ["", ""]
         email, pw = (a.email, lines[0]) if a.email else (lines[0], lines[1])
     if len(pw) < 12:
-        sys.exit("senha curta demais (mínimo 12 caracteres)")
+        sys.exit("password too short (minimum 12 characters)")
     set_user(email, pw)
-    print(f"login salvo: {normalize(email)} em {users_file()}")
+    print(f"login saved: {normalize(email)} in {users_file()}")
     return 0

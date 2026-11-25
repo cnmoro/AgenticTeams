@@ -2,7 +2,7 @@
 
 Register in a project (identity comes from AT_AGENT or .claude/agentic-teams.local.json):
 
-    claude mcp add agentic-teams --scope local -e AT_AGENT=vendas -- python3 /mnt/dados1/agentic-teams/bin/at-mcp
+    claude mcp add agentic-teams --scope local -e AT_AGENT=sales -- python3 /mnt/dados1/agentic-teams/bin/at-mcp
 
 The CLI (`at`) remains the primary interface; this is an alternative for
 sessions that prefer tools over shell commands.
@@ -18,24 +18,24 @@ S = {"type": "string"}
 I = {"type": "integer"}
 
 TOOLS = [
-    ("at_inbox", "Mensagens para você (menções, @todos, tarefas, humano). Marca como lidas.",
-     {"all": {"type": "boolean", "description": "inclui as já lidas"}}, []),
-    ("at_read", "Histórico recente de uma sala.", {"room": S, "limit": I, "after": I}, ["room"]),
-    ("at_say", "Envia mensagem numa sala, em Markdown com quebras de linha (uma linha por item). "
-               "Use @nome para mencionar (acorda só ele) e @todos para a sala inteira.",
+    ("at_inbox", "Messages for you (mentions, replies, @all, tasks, the human). Marks them read.",
+     {"all": {"type": "boolean", "description": "include read ones"}}, []),
+    ("at_read", "Recent history of a room.", {"room": S, "limit": I, "after": I}, ["room"]),
+    ("at_say", "Send a message to a room, in Markdown with line breaks (one line per item). "
+               "Use @name to mention (wakes only that agent) and @all for the whole room.",
      {"room": S, "body": S, "reply_to": I}, ["room", "body"]),
-    ("at_rooms", "Lista as salas e seus membros.", {}, []),
-    ("at_agents", "Lista os agentes do time, com pasta e último sinal de vida.", {}, []),
-    ("at_join", "Entra numa sala ou muda o modo de notificação (mentions | all | none).",
+    ("at_rooms", "List rooms and their members.", {}, []),
+    ("at_agents", "List the team's agents, with folder and last sign of life.", {}, []),
+    ("at_join", "Join a room or change the notification mode (mentions | all | none).",
      {"room": S, "notify": S}, ["room"]),
-    ("at_search", "Busca texto em todas as salas.", {"text": S}, ["text"]),
-    ("at_task_create", "Cria tarefa numa sala, opcionalmente atribuída e ligada à mensagem de origem.",
+    ("at_search", "Search text in every room.", {"text": S}, ["text"]),
+    ("at_task_create", "Create a task in a room, optionally assigned and linked to the message it comes from.",
      {"room": S, "title": S, "body": S, "assignee": S, "source_message_id": I}, ["title"]),
-    ("at_task_list", "Lista tarefas (padrão: abertas).",
-     {"room": S, "assignee": S, "status": {"type": "string", "enum": ["abertas", "aberta", "em_andamento", "feita", "cancelada"]}}, []),
-    ("at_task_update", "Muda status (aberta, em_andamento, feita, cancelada), responsável ou comenta uma tarefa.",
+    ("at_task_list", "List tasks (default: open ones).",
+     {"room": S, "assignee": S, "status": {"type": "string", "enum": ["open_any", "open", "in_progress", "done", "cancelled"]}}, []),
+    ("at_task_update", "Change a task's status (open, in_progress, done, cancelled) or assignee, or comment on it.",
      {"id": I, "status": S, "assignee": S, "note": S}, ["id"]),
-    ("at_spawn", "Pede (ou inicia, se permitido) um subagente claude --bg numa pasta.",
+    ("at_spawn", "Request (or start, if allowed) a claude --bg subagent in a folder.",
      {"folder": S, "name": S, "prompt": S, "rooms": {"type": "array", "items": S}, "permission_mode": S},
      ["folder", "name", "prompt"]),
 ]
@@ -44,21 +44,21 @@ TOOLS = [
 def call(client, name, a):
     if name == "at_inbox":
         d = client.get("/api/inbox", unread=None if a.get("all") else "1", mark_read="1")
-        return "\n".join(fmt_message(m, True) for m in d["items"]) or "(nenhuma mensagem nova)"
+        return "\n".join(fmt_message(m, True) for m in d["items"]) or "(no new messages)"
     if name == "at_read":
         d = client.get(f"/api/rooms/{q(a['room'].lstrip('#'))}/messages", limit=a.get("limit", 30),
                        after=a.get("after"), mark_read="1")
-        return "\n".join(fmt_message(m) for m in d) or "(sala vazia)"
+        return "\n".join(fmt_message(m) for m in d) or "(empty room)"
     if name == "at_say":
         m = client.post(f"/api/rooms/{q(a['room'].lstrip('#'))}/messages",
                         {"body": a["body"], "reply_to": a.get("reply_to")})
-        return (f"enviado #{m['id']} em #{m['room']}" + (f" (menciona: {', '.join(m['mentions'])})" if m["mentions"] else "")
+        return (f"sent #{m['id']} in #{m['room']}" + (f" (mentions: {', '.join(m['mentions'])})" if m["mentions"] else "")
                 + (f"\n{FORMAT_HINT}" if needs_format_hint(a["body"]) else ""))
     if name == "at_rooms":
         return "\n".join(f"#{r['name']} [{r['kind']}] {r['title']} — membros: "
                          f"{', '.join(m['name'] for m in r['members'])}" for r in client.get("/api/rooms"))
     if name == "at_agents":
-        return "\n".join(f"{x['handle']} ({x['kind']}) visto {x['last_seen']} salas: {', '.join(x['rooms'])}"
+        return "\n".join(f"{x['handle']} ({x['kind']}) seen {x['last_seen']} rooms: {', '.join(x['rooms'])}"
                          for x in client.get("/api/agents") if x["kind"] != "legacy")
     if name == "at_join":
         r = client.post(f"/api/rooms/{q(a['room'].lstrip('#'))}/join", {"notify": a.get("notify")})
@@ -66,15 +66,15 @@ def call(client, name, a):
     if name == "at_search":
         return "\n".join(fmt_message(m, True) for m in client.get("/api/search", q=a["text"])) or "(nada)"
     if name == "at_task_create":
-        t = client.post("/api/tasks", {"room": a.get("room", "geral"), "title": a["title"], "body": a.get("body", ""),
+        t = client.post("/api/tasks", {"room": a.get("room", "general"), "title": a["title"], "body": a.get("body", ""),
                                        "assignee": a.get("assignee"), "source_message_id": a.get("source_message_id")})
-        return "criada: " + fmt_task(t)
+        return "created: " + fmt_task(t)
     if name == "at_task_list":
-        d = client.get("/api/tasks", room=a.get("room"), assignee=a.get("assignee"), status=a.get("status", "abertas"))
-        return "\n".join(fmt_task(t) for t in d) or "(nenhuma)"
+        d = client.get("/api/tasks", room=a.get("room"), assignee=a.get("assignee"), status=a.get("status", "open_any"))
+        return "\n".join(fmt_task(t) for t in d) or "(none)"
     if name == "at_task_update":
         body = {k: a[k] for k in ("status", "assignee", "note") if k in a}
-        return "atualizada: " + fmt_task(client.patch(f"/api/tasks/{a['id']}", body))
+        return "updated: " + fmt_task(client.patch(f"/api/tasks/{a['id']}", body))
     if name == "at_spawn":
         s = client.post("/api/spawns", {k: a.get(k) for k in ("folder", "name", "prompt", "rooms", "permission_mode")})
         return f"subagente #{s['id']} {s['agent_name']}: {s['status']}\n{s['output']}".rstrip()
@@ -87,8 +87,8 @@ def handle(client, req):
         ver = (req.get("params") or {}).get("protocolVersion") or "2025-06-18"
         return {"protocolVersion": ver, "capabilities": {"tools": {}},
                 "serverInfo": {"name": "agentic-teams", "version": __version__},
-                "instructions": "Chat do time de agentes (AgenticTeams). Leia at_inbox ao começar; "
-                                "mencione com @nome; avise em #geral antes de mexer em VPN/servidores."}
+                "instructions": "Chat of the agent team (AgenticTeams). Read at_inbox when you start; "
+                                "mention with @name; warn in #general before touching shared VPN/servers."}
     if method == "ping":
         return {}
     if method == "tools/list":
@@ -98,7 +98,7 @@ def handle(client, req):
         p = req.get("params") or {}
         try:
             if client is None:
-                raise ApiError("identidade não configurada: defina AT_AGENT ou rode 'at install' no projeto")
+                raise ApiError("identity not configured: set AT_AGENT or run 'at install' in the project")
             return {"content": [{"type": "text", "text": call(client, p.get("name"), p.get("arguments") or {})}]}
         except (ApiError, KeyError, ValueError) as e:
             return {"content": [{"type": "text", "text": f"erro: {e}"}], "isError": True}
@@ -124,7 +124,7 @@ def main():
                 continue
             resp = {"jsonrpc": "2.0", "id": req["id"], "result": result}
         except LookupError as e:
-            resp = {"jsonrpc": "2.0", "id": req.get("id"), "error": {"code": -32601, "message": f"método desconhecido: {e}"}}
+            resp = {"jsonrpc": "2.0", "id": req.get("id"), "error": {"code": -32601, "message": f"unknown method: {e}"}}
         sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
         sys.stdout.flush()
     return 0

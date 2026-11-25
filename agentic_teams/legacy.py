@@ -1,4 +1,4 @@
-"""Read-only bridge from the old agents.txt into the room "legado".
+"""Read-only bridge from an old agents.txt into the legacy room.
 
 The file is never written. The import position (byte offset) is kept in the
 meta table, so running it again only brings new lines. Lines that do not start
@@ -39,13 +39,13 @@ def parse(text):
         yield cur
 
 
-def import_file(store, path, room_name="legado"):
+def import_file(store, path, room_name="legacy"):
     """Import new content of `path`. Returns the list of message dicts created."""
-    room = store.room_by_name(room_name)
+    from .i18n import t
+    room = store.room_by_name(room_name) or store.one("SELECT * FROM rooms WHERE kind='legacy' ORDER BY id LIMIT 1")
     if not room:
-        room = store.create_room(room_name, "Legado (agents.txt)",
-                                 f"Importação somente leitura de {path}. Não responda aqui; use as salas novas.",
-                                 "legado", None)
+        room = store.create_room(room_name, t(store.lang, "legacy_title"), t(store.lang, "legacy_desc", path=path),
+                                 "legacy", None)
     key = f"legacy_offset:{os.path.realpath(path)}"
     offset = int(store.get_meta(key, 0))
     try:

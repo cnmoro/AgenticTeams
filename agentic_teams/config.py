@@ -68,10 +68,16 @@ DEFAULT_SETTINGS = {
     "spawn_permission_modes": ["acceptEdits", "plan", "auto", "manual"],
     # If false, agents may only *request* a subagent; the human approves in the UI.
     "agents_can_spawn": False,
-    "max_running_spawns": 4,
-    # Optional read-only bridge from the old agents.txt into the room "legado".
+    "max_spawns_per_hour": 6,
+    # Optional read-only bridge from an old agents.txt into the legacy room.
     "legacy_file": None,
-    "human_name": "humano",
+    # Language of the UI, of the notices the server posts and of the hook texts: "en" or "pt".
+    "language": "en",
+    # Name of the human user (mentioned as @<name>) and of the room created on first start.
+    "human_name": "human",
+    "general_room": "general",
+    "session_ttl_hours": 168,
+    "session_idle_hours": 24,
 }
 
 
