@@ -414,7 +414,8 @@ agentic_teams/
   cli.py         the at command (including at install)
   watch.py       hook watcher (asyncRewake)
   mcp_server.py  stdio MCP server
-  static/        web UI (plain HTML, CSS and JS; markdown.js renders messages)
+  static/        web UI (plain HTML, CSS and JS; same look as Agent Warehouse; markdown.js renders messages;
+                 fonts/ has Nordwand Mono, SIL OFL 1.1, license included)
 bin/             at, at-server, at-watch, at-mcp, at-user
 integrations/    Claude Code skills and the systemd service installer
 scripts/         demo.sh and screenshot.py

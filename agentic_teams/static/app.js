@@ -78,6 +78,7 @@ function setSeen(room, id) { try { localStorage.setItem(seenKey(room), id); } ca
 async function loadAll() {
   [S.settings, S.me] = await Promise.all([api("GET", "/api/settings"), api("GET", "/api/me")]);
   setLang(S.settings.language); applyI18n();
+  $("#who").textContent = S.me.user || S.me.name; $("#who").title = S.me.user || S.me.handle;
   await Promise.all([loadAgents(), loadRooms(), loadSpawns(), loadTaskCount()]);
   const fromHash = decodeURIComponent(location.hash.slice(1));
   const target = S.rooms.find(r => r.name === fromHash) ? fromHash
@@ -94,25 +95,59 @@ async function loadTaskCount() {
 }
 
 // ------------------------------------------------------------------ rooms
+const roomHasNew = r => r.last_message_id > getSeen(r.name) && r.name !== S.room?.name;
 function renderRooms() {
   const ul = $("#rooms"); ul.replaceChildren();
-  for (const r of S.rooms) {
-    const hasNew = r.last_message_id > getSeen(r.name) && r.name !== S.room?.name;
+  const f = filterText();
+  const shown = S.rooms.filter(r => !f || r.name.includes(f) || (r.title || "").toLowerCase().includes(f));
+  for (const r of shown) {
+    const hasNew = roomHasNew(r);
     const n = S.newCount[r.name];
-    ul.append(el("li", { class: (S.room?.name === r.name ? "active" : ""), onclick: () => selectRoom(r.name),
-                         title: r.description || r.title },
-      el("span", { class: "name", style: hasNew ? "font-weight:700" : "" }, "#" + r.name),
+    ul.append(el("li", { class: [S.room?.name === r.name ? "active" : "", hasNew ? "unseen" : ""].join(" ").trim(),
+                         onclick: () => selectRoom(r.name), title: r.description || r.title },
+      el("span", { class: "dot " + (hasNew ? "activity" : "on") }),
+      el("span", { class: "name" }, "#" + r.name),
       r.unread ? el("span", { class: "badge", title: t("rooms.mentions") }, "@" + r.unread) : null,
       n ? el("span", { class: "badge muted", title: t("rooms.new_messages") }, n) : null,
       el("span", { class: "kind" }, r.kind !== "project" ? kindLabel(r.kind) : "")));
   }
+  $("#rooms-count").textContent = S.rooms.length || "";
+  renderStrip();
 }
+
+// ------------------------------------------------------------------ strip of open rooms (like Agent Warehouse tabs)
+function openRooms() { try { return JSON.parse(localStorage.getItem("at.open") || "[]"); } catch { return []; } }
+function saveOpenRooms(list) { try { localStorage.setItem("at.open", JSON.stringify(list)); } catch {} }
+function renderStrip() {
+  const strip = $("#strip"); strip.replaceChildren();
+  const names = openRooms().filter(n => S.rooms.some(r => r.name === n));
+  for (const name of names) {
+    const r = S.rooms.find(x => x.name === name);
+    const active = S.room?.name === name;
+    strip.append(el("div", { class: "chip" + (active ? " active" : "") + (roomHasNew(r) ? " activity" : ""), role: "tab",
+                             "aria-selected": active ? "true" : "false", title: r.title || r.name, onclick: () => selectRoom(name) },
+      el("span", { class: "dot" }), el("span", { class: "name" }, "#" + name),
+      el("button", { class: "chip-close", type: "button", "aria-label": t("strip.close"), title: t("strip.close"),
+                     onclick: ev => { ev.stopPropagation(); closeRoomTab(name); } }, "✕")));
+  }
+}
+function closeRoomTab(name) {
+  const list = openRooms().filter(n => n !== name);
+  saveOpenRooms(list);
+  if (S.room?.name === name) {
+    const next = list[list.length - 1] || (S.rooms.find(r => r.kind === "general") || S.rooms[0])?.name;
+    if (next) { selectRoom(next); return; }
+  }
+  renderStrip();
+}
+function filterText() { return ($("#find").hidden ? "" : $("#search").value.trim().toLowerCase()); }
 
 async function selectRoom(name) {
   try {
     const [room, msgs] = await Promise.all([api("GET", `/api/rooms/${name}`),
                                             api("GET", `/api/rooms/${name}/messages?limit=300&mark_read=1`)]);
     S.room = room; S.messages = msgs; S.newCount[name] = 0;
+    const open = openRooms(); if (!open.includes(name)) { open.push(name); saveOpenRooms(open.slice(-12)); }
     if (msgs.length) setSeen(name, msgs[msgs.length - 1].id);
     history.replaceState(null, "", "#" + name);
     const r = S.rooms.find(x => x.name === name); if (r) r.unread = 0;
@@ -123,11 +158,11 @@ async function selectRoom(name) {
 
 function renderRoomHead() {
   const r = S.room;
-  $("#room-title").textContent = "#" + r.name + (r.title && r.title !== r.name ? " — " + r.title : "");
+  $("#room-title").textContent = "#" + r.name + (r.title && r.title !== r.name ? " · " + r.title : "");
   $("#room-desc").textContent = r.description || "";
   const m = $("#room-members"); m.replaceChildren();
   for (const x of r.members) {
-    m.append(el("span", { class: "chip" + (x.notify === "all" ? " all" : ""),
+    m.append(el("span", { class: "member" + (x.notify === "all" ? " all" : ""),
                           title: x.notify === "all" ? t("member.all") : (x.notify === "none" ? t("member.none") : t("member.mentions")) },
                  x.name));
   }
@@ -256,7 +291,10 @@ function pickMention(i) {
 // ------------------------------------------------------------------ agents
 function renderAgents() {
   const ul = $("#agents"); ul.replaceChildren();
-  const people = S.agents.filter(a => a.kind === "agent" || a.kind === "human");
+  const f = filterText();
+  const people = S.agents.filter(a => (a.kind === "agent" || a.kind === "human") &&
+                                      (!f || a.name.includes(f) || (a.folder || "").toLowerCase().includes(f)));
+  $("#agents-count").textContent = S.agents.filter(a => a.kind === "agent").length || "";
   for (const a of people) {
     const s = ago(a.last_seen);
     const dot = a.kind === "human" ? "human" : (s < 120 ? "on" : s < 1800 ? "idle" : "");
@@ -264,11 +302,11 @@ function renderAgents() {
       : a.last_seen ? t("agents.seen", { when: new Date(a.last_seen).toLocaleString(locale()) }) : t("agents.never"));
     ul.append(el("li", { title: `${a.handle}\n${status}\n${t("agents.rooms", { rooms: a.rooms.join(", ") })}` },
       el("span", { class: "dot " + dot }),
-      el("span", { class: "name" }, a.name, a.folder ? el("span", { class: "folder" }, a.folder) : null)));
+      el("span", { class: "name" }, a.name, a.folder ? el("span", { class: "folder-path" }, a.folder) : null)));
   }
-  if (!people.some(a => a.kind === "agent")) ul.append(el("li", { class: "muted small" }, t("agents.none")));
+  if (!people.some(a => a.kind === "agent") && !f) ul.append(el("li", { class: "note" }, t("agents.none")));
   const legacy = S.agents.filter(a => a.kind === "legacy").length;
-  if (legacy) ul.append(el("li", { class: "muted small", title: t("agents.legacy_title") }, t("agents.legacy", { n: legacy })));
+  if (legacy && !f) ul.append(el("li", { class: "note", title: t("agents.legacy_title") }, t("agents.legacy", { n: legacy })));
 }
 
 // ------------------------------------------------------------------ tasks
@@ -391,7 +429,7 @@ async function doSearch(text) {
   if (!res.length) box.append(el("div", { class: "empty" }, t("search.none")));
   for (const m of res) {
     const n = msgEl(m); n.querySelector(".actions")?.remove();
-    n.querySelector(".meta").prepend(el("span", { class: "chip" }, "#" + m.room));
+    n.querySelector(".meta").prepend(el("span", { class: "member" }, "#" + m.room));
     n.style.cursor = "pointer";
     n.addEventListener("click", () => { $("#dlg-search").close(); gotoMessage(m.room, m.id); });
     box.append(n);
@@ -437,9 +475,11 @@ async function submitMember(e) {
 // ------------------------------------------------------------------ real time (SSE)
 function connect() {
   const es = new EventSource("/api/stream");
-  const conn = $("#conn");
-  es.addEventListener("hello", () => { conn.textContent = t("conn.connected"); conn.className = "conn on"; });
-  es.onerror = () => { conn.textContent = t("conn.reconnecting"); conn.className = "conn off"; };
+  const setConn = up => $$(".conn").forEach(c => {
+    c.classList.toggle("up", up); c.title = t(up ? "conn.connected" : "conn.reconnecting"); c.setAttribute("aria-label", c.title);
+  });
+  es.addEventListener("hello", () => setConn(true));
+  es.onerror = () => setConn(false);
   es.addEventListener("message", ev => {
     const m = JSON.parse(ev.data);
     const r = S.rooms.find(x => x.name === m.room);
@@ -461,6 +501,19 @@ function connect() {
   });
   es.addEventListener("agent", () => loadAgents().catch(fail));
   es.addEventListener("spawn", () => loadSpawns().catch(fail));
+}
+
+// ------------------------------------------------------------------ per-browser preferences
+function pref(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    if (value) localStorage.setItem(key, value); else localStorage.removeItem(key);
+  } catch { return null; }
+}
+function setFont(step) {
+  const size = Math.max(12, Math.min(18, (+pref("at.fs") || 14) + step));
+  document.documentElement.style.setProperty("--fs", size + "px");
+  pref("at.fs", size === 14 ? "" : String(size));
 }
 
 // ------------------------------------------------------------------ page events
@@ -487,8 +540,33 @@ function bind() {
   $("#reply-cancel").addEventListener("click", clearReply);
   $("#task-form").addEventListener("submit", createTask);
   $("#task-show-done").addEventListener("change", () => loadRoomTasks().catch(fail));
-  $("#btn-toggle-panel").addEventListener("click", () => document.querySelector(".app").classList.toggle("no-panel"));
+  $("#btn-toggle-panel").addEventListener("click", () => {
+    const hidden = $("#app").classList.toggle("no-panel");
+    $("#btn-toggle-panel").setAttribute("aria-expanded", String(!hidden)); pref("at.nopanel", hidden ? "1" : "");
+  });
   $("#btn-new-room").addEventListener("click", openNewRoom);
+  $("#rail-new-room").addEventListener("click", openNewRoom);
+  $("#collapse").addEventListener("click", () => { $("#app").classList.add("collapsed"); pref("at.collapsed", "1"); });
+  $("#expand").addEventListener("click", () => { $("#app").classList.remove("collapsed"); pref("at.collapsed", ""); });
+  $("#font-down").addEventListener("click", () => setFont(-1));
+  $("#font-up").addEventListener("click", () => setFont(1));
+  $("#btn-find").addEventListener("click", () => {
+    const box = $("#find"); box.hidden = !box.hidden;
+    $("#btn-find").setAttribute("aria-expanded", String(!box.hidden));
+    if (!box.hidden) $("#search").focus(); else { $("#search").value = ""; renderRooms(); renderAgents(); }
+  });
+  $("#search").addEventListener("input", () => { renderRooms(); renderAgents(); });
+  $$(".folder[data-section]").forEach(f => {
+    const sec = f.dataset.section, list = $("#" + sec);
+    const apply = closed => { f.classList.toggle("closed", closed); list.classList.toggle("closed", closed); };
+    apply(pref("at.closed." + sec) === "1");
+    const toggle = () => { const c = !f.classList.contains("closed"); apply(c); pref("at.closed." + sec, c ? "1" : ""); };
+    f.addEventListener("click", toggle);
+    f.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+  });
+  if (pref("at.collapsed") === "1") $("#app").classList.add("collapsed");
+  if (pref("at.nopanel") === "1") { $("#app").classList.add("no-panel"); $("#btn-toggle-panel").setAttribute("aria-expanded", "false"); }
+  setFont(0);
   $("#room-form").addEventListener("submit", submitRoom);
   $("#btn-add-member").addEventListener("click", openAddMember);
   $("#member-form").addEventListener("submit", submitMember);
@@ -496,7 +574,10 @@ function bind() {
   $("#all-tasks-filter").addEventListener("change", () => openAllTasks().catch(fail));
   $("#btn-spawns").addEventListener("click", openSpawns);
   $("#spawn-form").addEventListener("submit", submitSpawn);
-  $("#search").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.value.trim()) doSearch(e.target.value.trim()).catch(fail); });
+  $("#search").addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.target.value.trim()) doSearch(e.target.value.trim()).catch(fail);
+    if (e.key === "Escape") $("#btn-find").click();
+  });
   $$("[data-close]").forEach(b => b.addEventListener("click", () => b.closest("dialog").close()));
   window.addEventListener("hashchange", () => { const n = decodeURIComponent(location.hash.slice(1)); if (n && n !== S.room?.name) selectRoom(n); });
   setInterval(() => loadAgents().catch(() => {}), 30000);

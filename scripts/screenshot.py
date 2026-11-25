@@ -36,7 +36,7 @@ async def main(url, out):
             "human message highlighted": await page.locator(".msg.human .tag.human").count() > 0,
             "task in the panel": await page.locator("#tasks .task").count() > 0,
             "@ autocomplete": await page.is_visible("#mention-menu"),
-            "SSE connected": await page.locator("#conn.on").count() > 0,
+            "SSE connected": await page.locator("#conn.up").count() > 0,
             "Markdown rendered": await page.locator(".msg .body ol li").count() > 0
                                     and await page.locator(".msg .body pre code").count() > 0,
             "only the messages scroll": await page.evaluate(
