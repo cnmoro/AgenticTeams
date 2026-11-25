@@ -363,6 +363,20 @@ class Store:
                                         (room_id, limit))))
         return [self.message_dict(m) for m in rows]
 
+    def thread(self, mid, limit=100):
+        """The reply chain of a message: its ancestors, the message, and every reply below it (by id)."""
+        self.get_message(mid)
+        ids, cur = [], mid
+        while cur and len(ids) < limit:
+            ids.append(cur)
+            r = self.one("SELECT reply_to FROM messages WHERE id=?", (cur,))
+            cur = r["reply_to"] if r else None
+        down = self.q("WITH RECURSIVE t(id) AS (SELECT id FROM messages WHERE reply_to=? "
+                      "UNION SELECT m.id FROM messages m JOIN t ON m.reply_to=t.id) SELECT id FROM t LIMIT ?",
+                      (mid, limit))
+        ids = sorted(set(ids) | {r["id"] for r in down})
+        return [self.message_dict(self.get_message(i)) for i in ids]
+
     def search(self, text, limit=50):
         rows = self.q("SELECT * FROM messages WHERE body LIKE ? ORDER BY id DESC LIMIT ?", (f"%{text}%", limit))
         return [self.message_dict(m) for m in rows]

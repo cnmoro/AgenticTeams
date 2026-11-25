@@ -114,7 +114,9 @@ def test_watch_wakes_on_mention_only(env):
     p.wait(15)
     err = p.stderr.read()
     assert p.returncode == 2
-    assert "@beta preciso de você" in err and "<<'EOF'" in err and "aviso geral" not in err and "--as beta say" in err
+    assert "@beta preciso de você" in err and "<<'EOF'" in err and "--as beta say" in err
+    head, _, ctx = err.partition("Contexto recente de #geral")
+    assert "1 mensagem(ns)" in head and "aviso geral" not in head and "aviso geral" in ctx  # context, not a wake
     assert "#geral: @alfa" in err  # roster of the rooms, to know whom to mention
     # next run of the same session continues from the cursor and keeps waiting
     p2 = watch("beta", "s1")
@@ -189,3 +191,41 @@ def test_install_picks_name_from_folder(env, tmp_path):
     assert json.loads(run("install", "--project-dir", str(p1)).stdout)["agente"].startswith("painel-vendas_ia@")
     # another folder with the same basename gets a suffix
     assert json.loads(run("install", "--project-dir", str(p2)).stdout)["agente"] == f"painel-vendas_ia-2@{p2}"
+
+
+def test_watch_brings_recent_conversation_as_context(env):
+    for n in ("alfa", "beta", "gama"):
+        run("register", n)
+    run("--as", "alfa", "room", "create", "proj", "--members", "beta,gama")
+    run("--as", "gama", "say", "-r", "proj", "mensagem antiga que o gama já conhece")
+    run("--as", "gama", "inbox")
+    run("--human", "say", "-r", "proj", "@alfa @beta o placeholder está desalinhado")
+    run("--as", "alfa", "say", "-r", "proj", "-", stdin="Corrigi no Vendas:\n- line-height 22px\n- padding 11px 6px\n")
+    run("--as", "beta", "say", "-r", "proj", "Apliquei o mesmo no Estoque, commit abc123.")
+    run("--as", "gama", "inbox")  # the human message above woke gama too; mark it read
+    p = watch("gama", "ctx")
+    p.stdin.write(json.dumps({"session_id": "ctx"}))
+    p.stdin.close()
+    time.sleep(1.0)
+    run("--human", "say", "-r", "proj", "@gama veja o que acabamos de conversar e aplique as melhorias")
+    p.wait(15)
+    err = p.stderr.read()
+    assert p.returncode == 2
+    head, _, ctx = err.partition("Contexto recente de #proj")
+    assert "veja o que acabamos de conversar" in head
+    assert "line-height 22px" in ctx and "commit abc123" in ctx and "placeholder está desalinhado" in ctx
+    assert "mensagem antiga que o gama já conhece" in ctx  # window starts at gama's own last message
+    assert "Sala criada" not in ctx
+
+
+def test_thread_and_read_before(env):
+    run("register", "alfa")
+    run("register", "beta")
+    a = json.loads(run("--json", "--as", "alfa", "say", "pergunta inicial").stdout)["id"]
+    b = json.loads(run("--json", "--as", "beta", "say", "--reply", str(a), "resposta").stdout)["id"]
+    run("--as", "alfa", "say", "fora do fio")
+    c = json.loads(run("--json", "--as", "alfa", "say", "--reply", str(b), "tréplica").stdout)["id"]
+    out = run("--as", "beta", "thread", str(b)).stdout
+    assert "pergunta inicial" in out and "tréplica" in out and "fora do fio" not in out
+    before = run("--as", "beta", "read", "geral", "--before", str(c), "--peek").stdout
+    assert "fora do fio" in before and "tréplica" not in before

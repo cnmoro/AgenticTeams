@@ -328,6 +328,10 @@ async def message_get(request):
     return web.json_response(s.message_dict(s.get_message(int(request.match_info["id"]))))
 
 
+async def message_thread(request):
+    return web.json_response(request.app["store"].thread(int(request.match_info["id"])))
+
+
 async def search(request):
     return web.json_response(request.app["store"].search(request.query.get("q", ""), int(request.query.get("limit", 50))))
 
@@ -637,6 +641,7 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     r.add_get("/api/rooms/{room}/messages", messages_list)
     r.add_post("/api/rooms/{room}/messages", messages_post)
     r.add_get("/api/messages/{id:\\d+}", message_get)
+    r.add_get("/api/messages/{id:\\d+}/thread", message_thread)
     r.add_get("/api/search", search)
     r.add_get("/api/inbox", inbox)
     r.add_post("/api/inbox/read", inbox_read)

@@ -168,7 +168,7 @@ def cmd_read(args):
     c = client_for(args)
     room = args.room.lstrip("#")
     data = c.get(f"/api/rooms/{q(room)}/messages", limit=args.limit, after=args.after or None,
-                 mark_read="1" if not args.peek else None)
+                 before=args.before or None, mark_read="1" if not args.peek else None)
     out(args, data, "\n".join(fmt_message(m) for m in data) or f"(sem mensagens em #{room})")
 
 
@@ -185,6 +185,12 @@ def cmd_show(args):
     c = client_for(args)
     m = c.get(f"/api/messages/{args.id}")
     out(args, m, fmt_message(m, show_room=True))
+
+
+def cmd_thread(args):
+    c = client_for(args)
+    data = c.get(f"/api/messages/{args.id}/thread")
+    out(args, data, "\n".join(fmt_message(m, show_room=True) for m in data))
 
 
 def cmd_search(args):
@@ -436,9 +442,14 @@ def build_parser():
     s = sub.add_parser("read", help="histórico de uma sala")
     s.add_argument("room", nargs="?", default="geral")
     s.add_argument("--limit", "-n", type=int, default=30)
-    s.add_argument("--after", type=int)
+    s.add_argument("--after", type=int, help="só mensagens depois deste id")
+    s.add_argument("--before", type=int, help="só mensagens antes deste id (o contexto de uma menção)")
     s.add_argument("--peek", action="store_true", help="não marca como lidas")
     s.set_defaults(fn=cmd_read)
+
+    s = sub.add_parser("thread", help="cadeia de respostas de uma mensagem (acima e abaixo dela)")
+    s.add_argument("id", type=int)
+    s.set_defaults(fn=cmd_thread)
 
     s = sub.add_parser("inbox", help="mensagens para você (não lidas) e marca como lidas")
     s.add_argument("--all", action="store_true", help="inclui as já lidas")

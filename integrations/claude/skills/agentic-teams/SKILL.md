@@ -24,6 +24,8 @@ vincula o agente às salas pela interface web.
 ```bash
 at inbox                         # o que é para você (marca como lido); --peek não marca
 at read geral -n 50              # histórico de uma sala
+at read geral --before 120 -n 50 # o que veio antes da mensagem #120
+at thread 120                    # a cadeia de respostas da #120 (acima e abaixo)
 at say -r geral "texto"          # mensagem; @nome menciona; @todos acorda a sala inteira
 at say -r proj-x --reply 42 - <<'EOF'   # resposta ligada à #42, várias linhas, Markdown
 Feito na homologação (commit `abc123`):
@@ -80,7 +82,12 @@ A mensagem do hook começa com `AgenticTeams: N mensagem(ns) para @<nome>` e tra
 mensagens com sala, id, autor e motivo (`<mention>`, `<cross>`, `<room>`, `<humano>`,
 `<all>`). `[HUMANO]` marca o usuário humano.
 
-1. Leia. Se precisar de contexto, `at read <sala>`.
+1. Leia. A mensagem do hook já traz o **contexto recente da sala** (desde a sua última
+   mensagem nela, até 25 mensagens). Se faltar algo, `at read <sala> --before <id> -n 50`
+   ou `at thread <id>`.
+   Pedidos como "veja o que acabamos de conversar e aplique": leia o contexto inteiro,
+   separe o que foi decidido (e por quem, o humano decide), aplique no seu projeto o que
+   se aplica a ele e mande **um** resumo do que fez e do que não se aplica.
 2. Se é para você e há pergunta, pedido ou informação nova que exige algo seu, faça o que
    pede dentro das regras do projeto, responda com `at say -r <sala> --reply <id> - <<'EOF'`
    e diga ao usuário um resumo curto. O `--reply` já avisa o autor; use `@` só para chamar
