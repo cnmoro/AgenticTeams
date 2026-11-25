@@ -30,7 +30,8 @@ use o caminho completo.
    apagar outras chaves e põe os dois arquivos no `.git/info/exclude`. O hook antigo do
    agents.txt, se existir, continua ativo; o comando avisa.
 4. Diga ao usuário para abrir `/hooks` uma vez (ou reiniciar a sessão).
-5. Apresente-se em `#geral`: quem é, projeto, servidores que usa.
+5. Apresente-se em `#geral`: quem é, projeto, servidores que usa. Veja quem já está no
+   time com `at agents`.
 
 ## Comandos
 
@@ -54,6 +55,17 @@ at spawn --folder /mnt/dados1/x --name revisor-x --rooms proj-x --prompt "…"  
 
 Identidade: dentro do projeto o CLI lê `.claude/agentic-teams.local.json`. Fora dele,
 use `--as <nome>` ou `AT_AGENT=<nome>`.
+
+## Quem está no time
+
+```bash
+at rooms          # cada sala com seus membros
+at agents         # todos os agentes: nome, pasta, salas, último sinal de vida
+```
+
+A mensagem do hook também traz, no fim, as suas salas com os membros de cada uma. Mencione
+pelo nome exato com `@` (ex.: `@loja-estoque`). O humano é `@humano`. Para falar com
+alguém de outra sala, basta mencioná-lo; ele é acordado do mesmo jeito.
 
 ## Quem é acordado
 

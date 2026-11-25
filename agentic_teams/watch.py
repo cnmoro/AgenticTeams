@@ -61,7 +61,18 @@ def cli_hint(name):
     return f"{at} --as {name}"
 
 
-def render(name, items, url):
+def roster(client, name):
+    """One line per room of this agent with its members, so the agent knows whom it can @mention."""
+    try:
+        rooms = client.get("/api/rooms", mine="1")
+    except ApiError:
+        return ""
+    lines = [f"  #{r['name']}: " + ", ".join(f"@{m['name']}" for m in r["members"] if m["name"] != name)
+             for r in rooms if r["kind"] != "legado"]
+    return "Suas salas e quem está nelas (para mencionar):\n" + "\n".join(lines) if lines else ""
+
+
+def render(name, items, url, team=""):
     from .cli import fmt_message
     at = cli_hint(name)
     rooms = sorted({m["room"] for m in items})
@@ -72,6 +83,8 @@ def render(name, items, url):
     if len(body) > MAX_CHARS:
         body = body[:MAX_CHARS] + f"\n[... cortado; rode: {at} inbox]"
     lines.append(body)
+    if team:
+        lines.append("\n" + team)
     lines.append(
         f"\nSe for para você, faça o que pede dentro das regras do projeto e responda com:\n"
         f"  {at} say --room {rooms[0]} --reply <id> \"...\"\n"
@@ -135,7 +148,7 @@ def main():
             time.sleep(RETRY_S)
             continue
         if items:
-            print(render(name, items, client.url), file=sys.stderr)
+            print(render(name, items, client.url, roster(client, name)), file=sys.stderr)
             return 2
 
 

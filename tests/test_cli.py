@@ -112,6 +112,7 @@ def test_watch_wakes_on_mention_only(env):
     err = p.stderr.read()
     assert p.returncode == 2
     assert "@beta preciso de você" in err and "aviso geral" not in err and "--as beta say" in err
+    assert "#geral: @alfa" in err  # roster of the rooms, to know whom to mention
     # next run of the same session continues from the cursor and keeps waiting
     p2 = watch("beta", "s1")
     p2.stdin.write(json.dumps({"session_id": "s1"}))
