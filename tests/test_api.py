@@ -201,3 +201,18 @@ def test_stream_sends_events(env):
     assert line == b"event: message\n"
     assert b'"evento"' in resp.readline()
     conn.close()
+
+
+def test_failed_spawn_frees_the_name(env):
+    proj = env.roots / "p3"
+    proj.mkdir()
+    (env.fakebin / "claude").write_text("#!/bin/sh\necho 'Workspace not trusted. Run claude once.' >&2\nexit 1\n")
+    body = {"folder": str(proj), "name": "tentativa", "prompt": "oi"}
+    st, sp = env.req("POST", "/api/spawns", body, env.admin)
+    assert st == 200 and sp["status"] == "erro" and "aviso de confiança" in sp["output"]
+    assert env.store.agent_by_name("tentativa") is None
+    st, msgs = env.req("GET", "/api/rooms/geral/messages", token=env.admin)
+    assert "Falha ao iniciar" in msgs[-1]["body"]
+    (env.fakebin / "claude").write_text("#!/bin/sh\necho ok\n")
+    st, sp = env.req("POST", "/api/spawns", body, env.admin)
+    assert sp["status"] == "iniciado"

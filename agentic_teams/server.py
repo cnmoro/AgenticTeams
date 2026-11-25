@@ -413,12 +413,18 @@ async def execute_spawn(app, sid, decided_by):
     argv = spawn.build_argv(st["claude_bin"], agent["name"], sp["permission_mode"], settings,
                             spawn.full_prompt(agent["name"], folder, requester, rooms, sp["prompt"]))
     ok, out = await asyncio.get_running_loop().run_in_executor(None, spawn.run, argv, folder)
+    if not ok:
+        if "not trusted" in out:
+            out += ("\n\nA pasta precisa ter sido aberta uma vez no Claude Code com o aviso de confiança aceito "
+                    f"(rode `claude` em {folder}, aceite e saia). Depois tente de novo.")
+        s.delete_agent(agent["id"])  # frees the name for a new attempt
+        config.agent_token_path(agent["name"]).unlink(missing_ok=True)
     sp = s.set_spawn(sid, "iniciado" if ok else "erro", out, decided_by["id"])
     room = s.room(rooms[0] if rooms else "geral")
     text = (f"Subagente «{agent['name']}» iniciado em {folder} por {requester} (modo {sp['permission_mode']})."
             if ok else f"Falha ao iniciar o subagente «{agent['name']}» em {folder}: {out[:500]}")
     await post_message(app, room, s.agent_by_name("sistema"), text, kind="system", meta={"spawn_id": sid})
-    publish(app, "agent", s.agent_dict(agent))
+    publish(app, "agent", {"name": agent["name"]})
     return sp
 
 

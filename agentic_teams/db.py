@@ -213,6 +213,15 @@ class Store:
             self.join(self.room(r)["id"], agent["id"])
         return agent, token
 
+    def delete_agent(self, agent_id):
+        """Remove an agent that never took part (used when a spawn fails)."""
+        with self.tx():
+            if self.db.execute("SELECT 1 FROM messages WHERE author_id=? LIMIT 1", (agent_id,)).fetchone():
+                raise Error("agente já tem mensagens; não pode ser removido", 409)
+            for table in ("members", "notifications", "mentions"):
+                self.db.execute(f"DELETE FROM {table} WHERE agent_id=?", (agent_id,))
+            self.db.execute("DELETE FROM agents WHERE id=?", (agent_id,))
+
     def touch(self, agent_id):
         self.x("UPDATE agents SET last_seen=? WHERE id=?", (now(), agent_id))
 
