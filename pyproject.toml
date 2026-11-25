@@ -22,3 +22,4 @@ agentic_teams = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore::aiohttp.web_exceptions.NotAppKeyWarning"]

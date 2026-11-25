@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sys
+import warnings
 from pathlib import Path
 
 from aiohttp import web
@@ -19,6 +20,7 @@ from .db import Error, Store, now
 STATIC = Path(__file__).resolve().parent / "static"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
 log = logging.getLogger("agentic_teams")
+warnings.filterwarnings("ignore", category=web.NotAppKeyWarning)
 
 
 def jerr(msg, status):
@@ -261,7 +263,7 @@ async def inbox(request):
         cond: asyncio.Condition = request.app["cond"]
         loop = asyncio.get_running_loop()
         deadline = loop.time() + wait
-        while not items:
+        while not items and not request.app["state"]["closing"]:
             left = deadline - loop.time()
             if left <= 0:
                 break
@@ -502,6 +504,8 @@ async def on_cleanup(app):
 
 
 async def on_shutdown(app):
+    app["state"]["closing"] = True
+    await notify_waiters(app)
     for q in list(app["subscribers"]):
         q.put_nowait(("bye", {}))
 
@@ -517,6 +521,7 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     app["store"] = Store(db_path or config.home() / "teams.db", st.get("human_name") or "humano")
     app["admin_token"] = config.admin_token(create=True)
     app["subscribers"] = set()
+    app["state"] = {"closing": False}
     app["cond"] = asyncio.Condition()
     app["public_url"] = public_url or config.server_url()
     app["allowed_hosts"] = LOCAL_HOSTS | set(extra_hosts)
