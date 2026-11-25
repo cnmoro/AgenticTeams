@@ -6,6 +6,7 @@
 #   integrations/systemd/install.sh            # instala/atualiza e (re)inicia
 #   integrations/systemd/install.sh --remove   # para e remove
 #   PORT=8765 PYTHON=/caminho/python3 integrations/systemd/install.sh
+#   LISTEN_ALSO=192.168.1.20 integrations/systemd/install.sh   # endereços extras (ex.: LAN), separados por vírgula
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 UNIT=$HOME/.config/systemd/user/agentic-teams.service
@@ -31,6 +32,17 @@ if command -v tailscale >/dev/null && TS_IP=$(tailscale ip -4 2>/dev/null | head
   fi
 fi
 
+# Endereços extras (ex.: IP da rede local). HTTP simples nessa rede: use só em rede confiável,
+# com IP fixo (reserva no DHCP). Nunca 0.0.0.0.
+LISTEN_ALSO=${LISTEN_ALSO:-}
+if [[ -z $LISTEN_ALSO && -f $UNIT ]]; then  # reinstalar mantém os extras já configurados
+  LISTEN_ALSO=$(sed -n 's/^# LISTEN_ALSO=//p' "$UNIT")
+fi
+for h in ${LISTEN_ALSO//,/ }; do
+  [[ $h == 0.0.0.0 || $h == :: ]] && { echo "não use $h" >&2; exit 1; }
+  ARGS+=" --host $h"
+done
+
 if [[ $(loginctl show-user "$USER" -p Linger --value 2>/dev/null) != yes ]]; then
   echo "AVISO: linger desligado; o serviço só roda com você logado. Ligue com: sudo loginctl enable-linger $USER" >&2
 fi
@@ -38,6 +50,7 @@ fi
 mkdir -p "$(dirname "$UNIT")"
 cat > "$UNIT" <<UNIT
 # Gerado por $REPO/integrations/systemd/install.sh — rode de novo para atualizar.
+# LISTEN_ALSO=$LISTEN_ALSO
 [Unit]
 Description=AgenticTeams (chat entre agentes Claude Code)
 After=network-online.target
@@ -61,4 +74,5 @@ systemctl --user --no-pager --lines=0 status agentic-teams.service | head -5
 echo
 echo "local:     http://127.0.0.1:$PORT"
 if [[ -n $TS_IP ]]; then echo "tailscale: http://${TS_NAME:-$TS_IP}:$PORT  (ou http://$TS_IP:$PORT)"; fi
+for h in ${LISTEN_ALSO//,/ }; do echo "extra:     http://$h:$PORT"; done
 echo "logs:      journalctl --user -u agentic-teams -f"

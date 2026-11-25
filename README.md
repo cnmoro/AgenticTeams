@@ -29,6 +29,7 @@ ninguém logado):
 ```bash
 cd /mnt/dados1/agentic-teams
 integrations/systemd/install.sh            # instala ou atualiza e (re)inicia
+LISTEN_ALSO=192.168.1.20 integrations/systemd/install.sh   # + endereços extras (LAN), separados por vírgula
 integrations/systemd/install.sh --remove   # para e remove
 journalctl --user -u agentic-teams -f      # logs
 ```
@@ -39,8 +40,12 @@ da tailnet (aceitando o nome MagicDNS). Ele **não** usa `tailscale serve`/Funne
 nada fica exposto na internet. Se o Tailscale subir depois do serviço, o servidor continua
 no localhost e tenta o IP da tailnet de novo a cada 30 s.
 
-Nesta máquina: http://127.0.0.1:8765 e http://<máquina>.<tailnet>.ts.net:8765
-(ou http://<ip-tailscale>:8765).
+`LISTEN_ALSO` acrescenta outros endereços, como o IP da rede local. O valor fica anotado na
+unit, então rodar o instalador de novo mantém os extras. Na LAN o tráfego é HTTP simples
+(sem a cifra do Tailscale): use só em rede confiável e com IP fixo (reserva no DHCP).
+
+Nesta máquina: http://127.0.0.1:8765, http://192.168.1.20:8765 (LAN) e
+http://<máquina>.<tailnet>.ts.net:8765 (ou http://<ip-tailscale>:8765).
 
 Para rodar à mão: `bin/at-server` (só localhost) ou
 `bin/at-server --host 127.0.0.1 --host <ip-tailscale> --allow-host <nome.ts.net>`.
@@ -246,12 +251,13 @@ Limites do modelo, ditos com clareza: o servidor roda com o mesmo usuário do si
 agentes. Os tokens separam papéis e evitam engano (um agente não escreve como outro, um
 agente não aprova o próprio pedido), mas não são barreira contra um processo local
 malicioso, que pode ler `admin.token`. A proteção contra quem vem de fora é: escutar só em
-127.0.0.1 e no IP do Tailscale, exigir login (interface) ou token (API) em tudo, recusar
+127.0.0.1, no IP do Tailscale e nos endereços de `LISTEN_ALSO`, exigir login (interface) ou token (API) em tudo, recusar
 cabeçalho `Host` fora da lista (localhost, IP e nome do Tailscale; bloqueia DNS rebinding)
 e recusar escritas com `Origin` de outro site (CSRF).
 
-O acesso pela tailnet é HTTP simples dentro do túnel cifrado do Tailscale. Qualquer
-dispositivo da tailnet chega à tela de login, mas não passa dela sem a senha. Não use
+O acesso pela tailnet é HTTP simples dentro do túnel cifrado do Tailscale. Pela LAN
+(192.168.1.20) é HTTP sem cifra: senha e cookie trafegam abertos nessa rede. Qualquer
+dispositivo da tailnet ou da LAN chega à tela de login, mas não passa dela sem a senha. Não use
 `--host 0.0.0.0`.
 
 ## Servidor MCP (opcional)
