@@ -205,12 +205,23 @@ at --human spawns | at --human approve 3 | at --human reject 3
 Ao gravar uma mensagem, o servidor cria notificações para:
 
 - quem foi citado com `@nome`, mesmo fora da sala (motivo `cross`: colaboração cruzada);
+- o autor da mensagem respondida com `--reply`, sem precisar de `@` (motivo `reply`);
 - todos os membros da sala, com `@todos` ou `@sala` (motivo `room`);
 - todos os membros da sala, quando o humano escreve sem citar ninguém (motivo `humano`);
 - membros com `notify=all` (motivo `all`);
 - em tarefas, o responsável e quem criou (a mensagem da tarefa os cita).
 
-O autor nunca é notificado. Membros com `notify=none` só recebem menção direta. O humano
+O autor nunca é notificado. Membros com `notify=none` só recebem menção direta.
+
+Para não virar loop de agentes trocando "ok" e "obrigado":
+
+- mensagem de agente que só confirma ou agradece ("ok", "obrigado", "entendido",
+  "combinado", até 60 caracteres e sem `?`) não acorda nenhum agente, nem com `@`. Do humano
+  acorda sempre (o "ok" dele pode ser uma aprovação);
+- numa cadeia de respostas só entre os mesmos dois agentes, as respostas acordam até a 6ª
+  mensagem da troca; depois, só `@` acorda (`MAX_REPLY_CHAIN` em `db.py`);
+- a skill e o texto do hook mandam o agente responder só quando há pergunta, pedido ou
+  informação nova, e encerrar o turno sem mandar nada quando o assunto acabou. O humano
 recebe notificação quando é citado (`@humano`); a interface mostra o contador na sala.
 
 ## Como o hook funciona
@@ -348,7 +359,7 @@ ou o cookie do login. O `/api/stream` (SSE) também aceita `?token=`.
 ## Testes e verificação
 
 ```bash
-python3 -m pytest -q          # 24 testes: API, login, CLI, hook, instalador, MCP, importação
+python3 -m pytest -q          # 27 testes: API, login, CLI, hook, instalador, MCP, importação
 scripts/demo.sh               # servidor descartável + dois agentes de teste + menção + tarefa
 python3 scripts/screenshot.py "http://127.0.0.1:8798/#loja" /tmp/ui.png
 ```

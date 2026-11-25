@@ -18,6 +18,19 @@ RESERVED = ROOM_WIDE | {"sistema", "system", "admin"}
 TASK_STATUS = ("aberta", "em_andamento", "feita", "cancelada")
 NOTIFY_MODES = ("mentions", "all", "none")
 ROOM_KINDS = ("geral", "projeto", "tema", "legado")
+# A reply chain between the same two agents wakes up to this many messages in total; after that only @mentions wake.
+MAX_REPLY_CHAIN = 6
+ACK_RE = re.compile(
+    r"^(ok(ay)?|certo|entendido|entendi|obrigad[oa]s?|valeu|vlw|combinado|beleza|blz|perfeito|show|"
+    r"[óo]timo|feito|de acordo|recebido|anotado|fechado|tudo certo|sem problemas?|of course|thanks?|"
+    r"thank you|got it|noted|👍|✅|🙏)([\s,.!;:-]+(ok|obrigad[oa]|valeu|combinado|entendido|e você|"
+    r"de nada|por enquanto|então|pela ajuda|pelo aviso|pela resposta|👍|✅|🙏))*[\s.!]*$", re.IGNORECASE)
+
+
+def is_ack(body):
+    """True for a message that only acknowledges or thanks (no question, no new content)."""
+    text = MENTION_RE.sub("", body).strip(" \t\n,.;:!-")
+    return bool(text) and len(text) <= 60 and "?" not in text and bool(ACK_RE.match(text))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agents (
@@ -359,10 +372,14 @@ class Store:
 
         Who is notified (never the author):
         - agents mentioned by name, even outside the room (reason 'mention', or 'cross' if not a member);
+        - the author of the message being replied to (reason 'reply'), unless the reply chain between
+          the same two agents is already MAX_REPLY_CHAIN long;
         - @todos / @sala: every member of the room (reason 'room');
         - members with notify='all' (reason 'all');
         - a message from the human without mentions notifies every member (reason 'humano').
         Members with notify='none' only get explicit name mentions.
+        A message from an agent that only acknowledges ("ok", "obrigado"...) wakes nobody: that is what
+        keeps two agents from thanking each other forever.
         Returns (message_dict, [notified agent ids]).
         """
         body = (body or "").strip()
@@ -388,6 +405,12 @@ class Store:
                     if a and a["kind"] in ("agent", "human"):
                         self.db.execute("INSERT OR IGNORE INTO mentions(message_id,agent_id) VALUES(?,?)", (mid, a["id"]))
                         targets.setdefault(a["id"], "mention" if a["id"] in members or a["kind"] == "human" else "cross")
+                if reply_to:
+                    parent = self.db.execute("SELECT m.author_id, a.kind FROM messages m JOIN agents a "
+                                             "ON a.id=m.author_id WHERE m.id=?", (reply_to,)).fetchone()
+                    if parent and parent["kind"] in ("agent", "human") and \
+                            self._reply_chain(reply_to, author["id"], parent["author_id"]) <= MAX_REPLY_CHAIN:
+                        targets.setdefault(parent["author_id"], "reply")
                 room_wide = bool(names & ROOM_WIDE)
                 human_plain = author["kind"] == "human" and not names
                 for aid, mode in members.items():
@@ -401,12 +424,25 @@ class Store:
                         targets.setdefault(aid, "all")
                 targets.pop(author["id"], None)
                 kinds = {r["id"]: r["kind"] for r in self.db.execute("SELECT id, kind FROM agents")}
+                if author["kind"] == "agent" and is_ack(body):
+                    targets = {k: v for k, v in targets.items() if kinds.get(k) == "human"}
                 targets = {k: v for k, v in targets.items() if kinds.get(k) in ("agent", "human")}
                 ts = now()
                 for aid, reason in targets.items():
                     self.db.execute("INSERT INTO notifications(agent_id,message_id,reason,created_at) VALUES(?,?,?,?)",
                                     (aid, mid, reason, ts))
         return self.message_dict(self.get_message(mid)), list(targets)
+
+    def _reply_chain(self, mid, a, b):
+        """How many messages, going up the reply_to chain from `mid`, were written only by a or b."""
+        n = 0
+        while mid and n < 50:
+            r = self.db.execute("SELECT author_id, reply_to FROM messages WHERE id=?", (mid,)).fetchone()
+            if not r or r["author_id"] not in (a, b):
+                break
+            n += 1
+            mid = r["reply_to"]
+        return n + 1  # counts the message being posted
 
     def notify_direct(self, agent_id, message_id, reason):
         self.x("INSERT INTO notifications(agent_id,message_id,reason,created_at) VALUES(?,?,?,?)",

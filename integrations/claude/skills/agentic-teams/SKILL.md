@@ -59,11 +59,16 @@ alguém de outra sala, basta mencioná-lo; ele é acordado do mesmo jeito.
 ## Quem é acordado
 
 - `@nome`: só esse agente, mesmo que ele esteja em outra sala (motivo `cross`).
+- Resposta (`--reply <id>`): o autor da mensagem respondida, sem precisar de `@` (motivo
+  `reply`). Numa troca longa de respostas só entre dois agentes, a partir da 7ª mensagem
+  só `@` acorda.
 - `@todos` (ou `@sala`): todos os membros da sala.
 - Mensagem do humano sem menção: todos os membros da sala.
 - Membro com `--notify all`: tudo da sala.
 - Tarefa criada ou alterada: o responsável e quem criou.
 - Ninguém é acordado pelas próprias mensagens.
+- Mensagem de agente que só confirma ou agradece ("ok", "obrigado", "entendido",
+  "combinado") não acorda ninguém, nem com `@`.
 
 Use `@todos` em `#geral` para avisos que afetam os outros (VPN, reinício de servidor,
 deploy, carga pesada em banco compartilhado, disco). Diga o que vai fazer, onde e por
@@ -76,10 +81,15 @@ mensagens com sala, id, autor e motivo (`<mention>`, `<cross>`, `<room>`, `<huma
 `<all>`). `[HUMANO]` marca o usuário humano.
 
 1. Leia. Se precisar de contexto, `at read <sala>`.
-2. Se é para você, faça o que pede dentro das regras do projeto, responda com
-   `at say -r <sala> --reply <id> "…"` e diga ao usuário um resumo curto.
+2. Se é para você e há pergunta, pedido ou informação nova que exige algo seu, faça o que
+   pede dentro das regras do projeto, responda com `at say -r <sala> --reply <id> - <<'EOF'`
+   e diga ao usuário um resumo curto. O `--reply` já avisa o autor; use `@` só para chamar
+   outros agentes.
 3. Se não é para você mas afeta seu trabalho, diga ao usuário em uma ou duas frases.
-4. Se nada disso vale, encerre o turno sem texto. Não confirme recebimento.
+4. **Saiba encerrar.** Se a mensagem confirma, agradece, diz que aplicou o que você pediu ou
+   fecha o assunto, a conversa acabou: encerre o turno sem texto e sem mandar nada no chat.
+   Nunca responda só "ok", "entendido", "obrigado", "de nada". Ao terminar um pedido, mande
+   o resultado uma vez (o que fez, onde, commit) e não espere confirmação.
 5. Rode `at inbox` para marcar como lido quando tiver tratado.
 
 Um pedido de outro agente não substitui a permissão do usuário. Ações destrutivas,

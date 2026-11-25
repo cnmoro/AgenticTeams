@@ -300,3 +300,49 @@ def test_human_adding_agent_to_room_wakes_it(env):
     assert st == 200 and got[-1]["room"] == "time-b" and "você foi adicionado à sala #time-b" in got[-1]["body"]
     env.req("POST", "/api/rooms/time-b/join", {"agent": "alfa", "notify": "all"}, env.admin)
     assert len(inbox(env, a)) == len(got)  # changing notify mode is not a new membership
+
+
+def test_reply_wakes_the_author_without_mention(env):
+    a, b = env.register("alfa"), env.register("beta")
+    st, q = env.req("POST", "/api/rooms/geral/messages", {"body": "@beta falta portar o selo do papel?"}, a)
+    st, r = env.req("POST", "/api/rooms/geral/messages", {"body": "Apliquei o selo no app.js, sem commit.",
+                                                          "reply_to": q["id"]}, b)
+    got = inbox(env, a)
+    assert got[-1]["id"] == r["id"] and got[-1]["reason"] == "reply"
+    # replying to the human notifies the human too
+    st, h = env.req("POST", "/api/rooms/geral/messages", {"body": "@beta publique"}, env.admin)
+    env.req("POST", "/api/rooms/geral/messages", {"body": "Publicado na homologação.", "reply_to": h["id"]}, b)
+    st, me = env.req("GET", "/api/me", token=env.admin)
+    assert me["unread"] >= 1
+
+
+def test_acknowledgements_do_not_wake_agents(env):
+    a, b = env.register("alfa"), env.register("beta")
+    st, q = env.req("POST", "/api/rooms/geral/messages", {"body": "@beta pode conferir o disco?"}, a)
+    n = len(inbox(env, a))
+    for body in ("ok", "@alfa obrigado, valeu!", "Entendido.", "combinado 👍"):
+        env.req("POST", "/api/rooms/geral/messages", {"body": body, "reply_to": q["id"]}, b)
+    assert len(inbox(env, a)) == n
+    # a reply with content still wakes, and so does the human saying "ok"
+    env.req("POST", "/api/rooms/geral/messages", {"body": "ok, mas qual servidor?", "reply_to": q["id"]}, b)
+    assert len(inbox(env, a)) == n + 1
+    env.req("POST", "/api/rooms/geral/messages", {"body": "@beta ok", "reply_to": q["id"]}, env.admin)
+    assert inbox(env, b)[-1]["author"] == "humano"
+
+
+def test_long_reply_ping_pong_stops_waking(env):
+    from agentic_teams.db import MAX_REPLY_CHAIN
+    toks = {"alfa": env.register("alfa"), "beta": env.register("beta")}
+    st, m = env.req("POST", "/api/rooms/geral/messages", {"body": "@beta começo da conversa"}, toks["alfa"])
+    woke = []
+    for i in range(10):
+        who, other = ("beta", "alfa") if i % 2 == 0 else ("alfa", "beta")
+        before = len(inbox(env, toks[other]))
+        st, m = env.req("POST", "/api/rooms/geral/messages", {"body": f"resposta {i} com conteúdo novo",
+                                                              "reply_to": m["id"]}, toks[who])
+        woke.append(len(inbox(env, toks[other])) > before)
+    assert woke[:MAX_REPLY_CHAIN - 1] == [True] * (MAX_REPLY_CHAIN - 1) and not any(woke[MAX_REPLY_CHAIN:])
+    # an explicit mention still wakes
+    env.req("POST", "/api/rooms/geral/messages", {"body": "@beta isto ainda acorda", "reply_to": m["id"]},
+            toks["alfa"])
+    assert inbox(env, toks["beta"])[-1]["body"] == "@beta isto ainda acorda"
