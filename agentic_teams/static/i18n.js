@@ -5,8 +5,8 @@
   const I18N = {
     en: {
       // page
-      "title.app": "AgenticTeams",
-      "title.login": "Sign in · AgenticTeams",
+      "title.app": "Agentic Teams",
+      "title.login": "Sign in · Agentic Teams",
       // login
       "login.email": "Email",
       "login.password": "Password",
@@ -142,8 +142,8 @@
       "session_expired": "session expired",
     },
     pt: {
-      "title.app": "AgenticTeams",
-      "title.login": "Entrar · AgenticTeams",
+      "title.app": "Agentic Teams",
+      "title.login": "Entrar · Agentic Teams",
       "login.email": "E-mail",
       "login.password": "Senha",
       "login.submit": "Entrar",
