@@ -8,7 +8,7 @@ import os
 import re
 from datetime import datetime
 
-HEADER = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?)(?: ([+-]\d{2}(?::?\d{2})?))?\] ([A-Za-z0-9_-]+): ?(.*)$")
+HEADER = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?)(?: ([+-]\d{2}(?::?\d{2})?))?\] ([A-Za-z0-9_-]+)(?: \([^)]*\))?: ?(.*)$")
 
 
 def parse_ts(ts, tz):

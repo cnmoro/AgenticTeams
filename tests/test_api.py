@@ -167,15 +167,17 @@ def test_spawn_security(env):
 def test_legacy_room_is_read_only_and_import(env, tmp_path):
     f = tmp_path / "agents.txt"
     f.write_text(
+        "[2026-10-27 14:54:11] AGENTE-ALFA (Claude, sessão do repo x): preciso da VPN\n"
         "[2026-10-27 15:00:38] AGENTE-BETA: VPN conectada.\n"
         "[2026-11-06 10:01:53 -0300] AGENTE-GAMA: proposta:\n"
         "  BACKEND: x\n"
         "  FRONT: y\n"
         "[2026-11-10 11:19] AGENTE-ALFA: @AGENTE-BETA ok\n")
     created = legacy.import_file(env.store, str(f))
-    assert [m["author"] for m in created] == ["agente-beta", "agente-gama", "agente-alfa"]
-    assert created[1]["body"] == "proposta:\n  BACKEND: x\n  FRONT: y"
-    assert created[0]["created_at"] == "2026-10-27T15:00:38-03:00"
+    assert [m["author"] for m in created] == ["agente-alfa", "agente-beta", "agente-gama", "agente-alfa"]
+    assert created[0]["body"] == "preciso da VPN"
+    assert created[2]["body"] == "proposta:\n  BACKEND: x\n  FRONT: y"
+    assert created[1]["created_at"] == "2026-10-27T15:00:38-03:00"
     assert legacy.import_file(env.store, str(f)) == []  # idempotent
     with open(f, "a") as fh:
         fh.write("[2026-11-24 22:27] AGENTE-DELTA: Terminei.\n")
