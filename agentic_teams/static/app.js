@@ -1,7 +1,7 @@
 "use strict";
 // AgenticTeams — interface do usuário humano (JS puro, sem build).
 
-const TOKEN = document.querySelector('meta[name="at-token"]').content;
+// A interface usa o cookie de sessão do login (/login); agentes e CLI usam Bearer token.
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const S = { settings: {}, me: null, rooms: [], agents: [], room: null, messages: [], tasks: [], spawns: [],
@@ -12,10 +12,11 @@ const KIND_LABEL = { geral: "geral", projeto: "projeto", tema: "tema", legado: "
 
 async function api(method, path, body) {
   const r = await fetch(path, {
-    method, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
+    method, headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = "/login" + location.hash; throw new Error("sessão expirada"); }
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }
@@ -423,7 +424,7 @@ async function submitMember(e) {
 
 // ------------------------------------------------------------------ tempo real (SSE)
 function connect() {
-  const es = new EventSource("/api/stream?token=" + encodeURIComponent(TOKEN));
+  const es = new EventSource("/api/stream");
   const conn = $("#conn");
   es.addEventListener("hello", () => { conn.textContent = "conectado"; conn.className = "conn on"; });
   es.onerror = () => { conn.textContent = "reconectando…"; conn.className = "conn off"; };
@@ -453,6 +454,10 @@ function connect() {
 // ------------------------------------------------------------------ eventos da página
 function bind() {
   $("#composer").addEventListener("submit", send);
+  $("#btn-logout").addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" }).catch(() => {});
+    location.href = "/login";
+  });
   const input = $("#input");
   input.addEventListener("input", updateMenu);
   input.addEventListener("click", updateMenu);

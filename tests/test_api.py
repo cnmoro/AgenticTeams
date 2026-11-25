@@ -216,3 +216,75 @@ def test_failed_spawn_frees_the_name(env):
     (env.fakebin / "claude").write_text("#!/bin/sh\necho ok\n")
     st, sp = env.req("POST", "/api/spawns", body, env.admin)
     assert sp["status"] == "iniciado"
+
+
+def _http(env, method, path, body=None, headers=None):
+    import urllib.request
+    data = json.dumps(body).encode() if body is not None else None
+    r = urllib.request.Request(env.url + path, data=data, method=method, headers=headers or {})
+    if data:
+        r.add_header("Content-Type", "application/json")
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+    opener = urllib.request.build_opener(NoRedirect)
+    try:
+        resp = opener.open(r, timeout=10)
+    except urllib.error.HTTPError as e:
+        resp = e
+    return resp.status if hasattr(resp, "status") else resp.code, resp.headers, resp.read().decode()
+
+
+def test_web_login(env):
+    from agentic_teams import auth
+    auth.set_user("Dono@Example.com", "senha-de-teste-123")
+    origin = {"Origin": env.url}
+    # the page and the API need a login; the admin token is no longer in the page
+    st, h, _ = _http(env, "GET", "/")
+    assert st == 302 and h["Location"] == "/login"
+    assert _http(env, "GET", "/login")[0] == 200
+    assert _http(env, "GET", "/api/rooms")[0] == 401
+    # login needs a matching Origin
+    assert _http(env, "POST", "/api/login", {"email": "dono@example.com", "password": "senha-de-teste-123"})[0] == 403
+    st, _, body = _http(env, "POST", "/api/login", {"email": "dono@example.com", "password": "errada-errada"}, origin)
+    assert st == 401
+    st, h, _ = _http(env, "POST", "/api/login", {"email": " DONO@example.com", "password": "senha-de-teste-123"},
+                     origin)
+    assert st == 200
+    cookie = h["Set-Cookie"]
+    assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
+    c = {"Cookie": cookie.split(";", 1)[0]}
+    st, _, page = _http(env, "GET", "/", headers=c)
+    assert st == 200 and env.admin not in page
+    st, _, me = _http(env, "GET", "/api/me", headers=c)
+    assert json.loads(me)["kind"] == "human" and json.loads(me)["user"] == "dono@example.com"
+    # writes with the cookie need the Origin header (CSRF)
+    assert _http(env, "POST", "/api/rooms/geral/messages", {"body": "oi"}, c)[0] == 403
+    st, _, m = _http(env, "POST", "/api/rooms/geral/messages", {"body": "oi"}, {**c, **origin})
+    assert st == 200 and json.loads(m)["author_kind"] == "human"
+    # changing the password ends the session
+    auth.set_user("dono@example.com", "outra-senha-12345")
+    assert _http(env, "GET", "/api/me", headers=c)[0] == 401
+    st, h, _ = _http(env, "POST", "/api/login", {"email": "dono@example.com", "password": "outra-senha-12345"}, origin)
+    c = {"Cookie": h["Set-Cookie"].split(";", 1)[0]}
+    assert _http(env, "POST", "/api/logout", None, {**c, **origin})[0] == 200
+    assert _http(env, "GET", "/api/me", headers=c)[0] == 401
+
+
+def test_login_throttling(env):
+    origin = {"Origin": env.url}
+    codes = [_http(env, "POST", "/api/login", {"email": "x@y.z", "password": "nada-nada-nada"}, origin)[0]
+             for _ in range(6)]
+    assert codes == [401] * 5 + [429]
+
+
+def test_claude_manager_hash_format():
+    """Hashes written by claude-manager (Node crypto.scrypt) verify here."""
+    import base64, hashlib
+    from agentic_teams import auth
+    salt = b"0123456789abcdef"
+    key = hashlib.scrypt(b"pw-pw-pw-pw-pw", salt=salt, n=32768, r=8, p=1, maxmem=64 << 20, dklen=64)
+    stored = f"scrypt$32768$8$1${base64.b64encode(salt).decode()}${base64.b64encode(key).decode()}"
+    assert auth.verify_password("pw-pw-pw-pw-pw", stored)
+    assert not auth.verify_password("outra", stored)

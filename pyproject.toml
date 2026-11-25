@@ -13,6 +13,7 @@ at = "agentic_teams.cli:main"
 at-server = "agentic_teams.server:main"
 at-watch = "agentic_teams.watch:main"
 at-mcp = "agentic_teams.mcp_server:main"
+at-user = "agentic_teams.auth:main"
 
 [tool.setuptools]
 packages = ["agentic_teams"]

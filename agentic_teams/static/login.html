@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar · AgenticTeams</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-page">
+  <form id="login" class="login-card" autocomplete="on">
+    <div class="brand"><span class="logo">AT</span><strong>AgenticTeams</strong></div>
+    <label>E-mail
+      <input type="text" name="email" autocapitalize="none" spellcheck="false" autocomplete="username" required autofocus>
+    </label>
+    <label>Senha
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <p id="error" class="error" role="alert" hidden></p>
+    <button class="primary" type="submit">Entrar</button>
+  </form>
+  <script src="/static/login.js"></script>
+</body>
+</html>

@@ -23,22 +23,55 @@ padrão.
 
 ## Subir o servidor
 
+Como serviço 24/7 (systemd de usuário; com `loginctl enable-linger` ele sobe no boot sem
+ninguém logado):
+
 ```bash
 cd /mnt/dados1/agentic-teams
-bin/at-server                      # http://127.0.0.1:8765  (dados em ~/.local/share/agentic-teams)
+integrations/systemd/install.sh            # instala ou atualiza e (re)inicia
+integrations/systemd/install.sh --remove   # para e remove
+journalctl --user -u agentic-teams -f      # logs
 ```
 
-Abra http://127.0.0.1:8765 no navegador. O servidor escuta só em 127.0.0.1.
+O instalador gera `~/.config/systemd/user/agentic-teams.service` com `Restart=always` e
+faz o servidor escutar em `127.0.0.1:8765` e, se o Tailscale estiver ativo, também no IP
+da tailnet (aceitando o nome MagicDNS). Ele **não** usa `tailscale serve`/Funnel, então
+nada fica exposto na internet. Se o Tailscale subir depois do serviço, o servidor continua
+no localhost e tenta o IP da tailnet de novo a cada 30 s.
 
-Para deixar sempre no ar, há uma unidade de usuário do systemd em
-`integrations/systemd/agentic-teams.service` (instruções no próprio arquivo).
+Nesta máquina: http://127.0.0.1:8765 e http://<máquina>.<tailnet>.ts.net:8765
+(ou http://<ip-tailscale>:8765).
+
+Para rodar à mão: `bin/at-server` (só localhost) ou
+`bin/at-server --host 127.0.0.1 --host <ip-tailscale> --allow-host <nome.ts.net>`.
+
+### Login da interface
+
+A interface pede e-mail e senha, no mesmo esquema do claude-manager: hash scrypt em
+`$AT_HOME/users.json` (0600), sessão em cookie `HttpOnly; SameSite=Strict` guardada em
+memória (reiniciar o servidor desloga), validade de 7 dias e 24 h sem uso, 5 tentativas
+por IP a cada 15 min, e escritas com cookie só com `Origin` igual ao host (CSRF). Trocar a
+senha encerra as sessões abertas.
+
+```bash
+bin/at-user                                  # cria ou troca um login (pergunta e-mail e senha)
+bin/at-user --remove alguem@exemplo.com
+bin/at-user --copy-from <pasta-do-claude-manager>/<DATA_DIR>/users.json voce@exemplo.com
+```
+
+O login atual foi copiado (só o hash) da instância do claude-manager em `<DATA_DIR>`.
+A cópia é independente: se a senha mudar lá, rode o `--copy-from` de novo.
+
+Agentes e CLI não usam o login: continuam com token Bearer (`$AT_HOME/agents/*.token` e
+`admin.token` para `at --human`).
 
 Opções e arquivos:
 
 - `--port`, `--host`, `--db`. Variáveis: `AT_HOME` (pasta de dados), `AT_URL` (onde o
   CLI procura o servidor, padrão `http://127.0.0.1:8765`), `AT_PORT`, `AT_HOST`.
 - `$AT_HOME/teams.db`: banco SQLite.
-- `$AT_HOME/admin.token`: token do humano (criado na primeira subida, permissão 0600).
+- `$AT_HOME/admin.token`: token do humano para CLI e scripts (criado na primeira subida, 0600).
+- `$AT_HOME/users.json`: logins da interface web (0600).
 - `$AT_HOME/agents/<nome>.token`: token de cada agente (0600).
 - `$AT_HOME/config.json` (opcional, lido na subida):
 
@@ -50,7 +83,9 @@ Opções e arquivos:
     "agents_can_spawn": false,
     "max_spawns_per_hour": 6,
     "legacy_file": "/caminho/para/agents.txt",
-    "claude_bin": "claude"
+    "claude_bin": "claude",
+    "session_ttl_hours": 168,
+    "session_idle_hours": 24
   }
   ```
 
@@ -210,13 +245,14 @@ Regras de segurança:
 Limites do modelo, ditos com clareza: o servidor roda com o mesmo usuário do sistema que os
 agentes. Os tokens separam papéis e evitam engano (um agente não escreve como outro, um
 agente não aprova o próprio pedido), mas não são barreira contra um processo local
-malicioso, que pode ler `admin.token`. A proteção real contra abuso de fora é: escutar só
-em 127.0.0.1, exigir token em toda a API, recusar cabeçalho `Host` diferente de
-localhost (bloqueia DNS rebinding) e recusar `Origin` de outro site em escritas (CSRF).
-A interface recebe o token embutido na página, servida só para `Host` local.
+malicioso, que pode ler `admin.token`. A proteção contra quem vem de fora é: escutar só em
+127.0.0.1 e no IP do Tailscale, exigir login (interface) ou token (API) em tudo, recusar
+cabeçalho `Host` fora da lista (localhost, IP e nome do Tailscale; bloqueia DNS rebinding)
+e recusar escritas com `Origin` de outro site (CSRF).
 
-Se precisar expor na rede (não recomendado): `--host 0.0.0.0 --allow-host <nome>`, e
-coloque um proxy com TLS na frente. Quem tiver o token lê e escreve tudo.
+O acesso pela tailnet é HTTP simples dentro do túnel cifrado do Tailscale. Qualquer
+dispositivo da tailnet chega à tela de login, mas não passa dela sem a senha. Não use
+`--host 0.0.0.0`.
 
 ## Servidor MCP (opcional)
 
@@ -244,11 +280,12 @@ continuação da mensagem anterior.
 
 ## API
 
-Toda rota em `/api` (menos `/api/health`) exige `Authorization: Bearer <token>`. O
-`/api/stream` (SSE) aceita `?token=`.
+Toda rota em `/api` (menos `/api/health` e `/api/login`) exige `Authorization: Bearer <token>`
+ou o cookie do login. O `/api/stream` (SSE) também aceita `?token=`.
 
 | Método e rota | O que faz |
 |---|---|
+| `POST /api/login` · `/api/logout` | login da interface `{email, password}` → cookie |
 | `GET /api/me` | quem sou, salas, não lidas |
 | `GET/POST /api/agents` | lista; registra agente (só humano) → `{agent, token}` |
 | `GET/POST /api/rooms` | lista (`?mine=1`); cria `{name,title,description,kind,members}` |
@@ -266,7 +303,7 @@ Toda rota em `/api` (menos `/api/health`) exige `Authorization: Bearer <token>`.
 ## Testes e verificação
 
 ```bash
-python3 -m pytest -q          # 19 testes: API, CLI, hook, instalador, MCP, importação
+python3 -m pytest -q          # 22 testes: API, login, CLI, hook, instalador, MCP, importação
 scripts/demo.sh               # servidor descartável + dois agentes de teste + menção + tarefa
 python3 scripts/screenshot.py "http://127.0.0.1:8798/#loja" /tmp/ui.png
 ```
@@ -281,6 +318,7 @@ imagem do topo saiu desse roteiro.
 ```
 agentic_teams/
   db.py          SQLite: agentes, salas, mensagens, menções, notificações, tarefas, subagentes
+  auth.py        login da interface (scrypt como o claude-manager, sessões, limite de tentativas)
   server.py      aiohttp: API, SSE, long-poll da inbox, ponte do agents.txt, checagens de Host/Origin/token
   spawn.py       validação e montagem do comando claude --bg
   legacy.py      leitura do agents.txt
@@ -289,8 +327,8 @@ agentic_teams/
   watch.py       vigia do hook (asyncRewake)
   mcp_server.py  servidor MCP stdio
   static/        interface web (HTML, CSS e JS puros)
-bin/             at, at-server, at-watch, at-mcp
-integrations/    skill do Claude Code e unidade systemd
+bin/             at, at-server, at-watch, at-mcp, at-user
+integrations/    skill do Claude Code e instalador do serviço systemd
 scripts/         demo.sh e screenshot.py
 tests/
 ```
@@ -308,7 +346,6 @@ Ainda não feito ou não verificado:
   chat e é acordada por menção.
 - **Migração**: nenhum projeto foi alterado. Quando quiser, rode `at install` em cada um
   (seção "Como um agente entra no time") e instale a skill em `~/.claude/skills/`.
-- **Servidor sempre no ar**: a unidade systemd está pronta, não instalada.
 - Ideias: lista de subagentes em execução com `claude agents`/`stop` a partir da interface;
   arquivar e renomear salas; reações e "visto por"; editar ou apagar mensagem; retenção e
   backup do SQLite; notificação no desktop para menções ao humano; tokens com expiração.

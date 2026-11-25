@@ -14,7 +14,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import config, legacy, spawn
+from . import auth, config, legacy, spawn
 from .db import Error, Store, now
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -28,34 +28,65 @@ def jerr(msg, status):
 
 
 # --------------------------------------------------------------------------- middleware
+PUBLIC = {"/login", "/api/login", "/api/health", "/static/login.js", "/static/style.css"}
+
+
+def host_of(request):
+    h = request.host or ""
+    return "[::1]" if h.startswith("[") else h.rsplit(":", 1)[0]
+
+
+def same_origin(request):
+    """Origin must be present and equal to the Host the browser used (blocks CSRF)."""
+    origin = request.headers.get("Origin", "")
+    return bool(origin) and origin.split("://", 1)[-1].rstrip("/") == request.host
+
+
+def session_of(request):
+    return request.app["sessions"].get(request.cookies.get(auth.COOKIE))
+
+
 @web.middleware
 async def guard(request, handler):
-    """Host/Origin checks (DNS rebinding, CSRF) and token authentication for /api."""
+    """Host/Origin checks (DNS rebinding, CSRF) and authentication.
+
+    Two ways in: a Bearer token (agents, CLI, `at --human`) or the login cookie of the web UI.
+    """
     app = request.app
-    host = (request.host or "").rsplit(":", 1)[0] if not (request.host or "").startswith("[") else "[::1]"
-    if host not in app["allowed_hosts"]:
+    if host_of(request) not in app["allowed_hosts"]:
         return jerr(f"host não permitido: {request.host}", 403)
     origin = request.headers.get("Origin")
     if origin and request.method not in ("GET", "HEAD", "OPTIONS"):
         ohost = origin.split("://", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0]
         if ohost not in app["allowed_hosts"]:
             return jerr("origem não permitida", 403)
-    if request.path.startswith("/api/") and request.path != "/api/health":
-        auth = request.headers.get("Authorization", "")
-        token = auth[7:] if auth.startswith("Bearer ") else request.query.get("token", "")
-        if not token:
-            return jerr("token ausente (Authorization: Bearer ...)", 401)
-        store: Store = app["store"]
-        if token == app["admin_token"]:
-            request["who"] = store.human()
-            request["admin"] = True
-        else:
-            who = store.agent_by_token(token)
-            if not who:
-                return jerr("token inválido", 401)
-            request["who"] = who
-            request["admin"] = False
-            store.touch(who["id"])
+    path = request.path
+    store: Store = app["store"]
+    if path not in PUBLIC:
+        auth_h = request.headers.get("Authorization", "")
+        token = auth_h[7:] if auth_h.startswith("Bearer ") else ""
+        if not token and path == "/api/stream":
+            token = request.query.get("token", "")  # SSE clients that cannot send headers
+        sess = None if token else session_of(request)
+        if token:
+            if token == app["admin_token"]:
+                request["who"], request["admin"] = store.human(), True
+            else:
+                who = store.agent_by_token(token)
+                if not who:
+                    return jerr("token inválido", 401)
+                request["who"], request["admin"] = who, False
+                store.touch(who["id"])
+        elif sess:
+            if request.method not in ("GET", "HEAD") and not same_origin(request):
+                return jerr("origem ausente ou diferente (CSRF)", 403)
+            request["who"], request["admin"], request["user"] = store.human(), True, sess["email"]
+        elif path == "/":
+            raise web.HTTPFound("/login")
+        elif path.startswith("/api/"):
+            return jerr("não autenticado: faça login ou use Authorization: Bearer", 401)
+        elif not path.startswith("/static/"):
+            raise web.HTTPFound("/login")
     try:
         return await handler(request)
     except Error as e:
@@ -104,11 +135,52 @@ def need_admin(request):
 
 # --------------------------------------------------------------------------- pages
 async def index(request):
-    page = (STATIC / "index.html").read_text()
-    page = page.replace("__AT_TOKEN__", html.escape(request.app["admin_token"]))
-    return web.Response(text=page, content_type="text/html",
-                        headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
-                                 "Referrer-Policy": "no-referrer"})
+    return web.FileResponse(STATIC / "index.html", headers=PAGE_HEADERS)
+
+
+PAGE_HEADERS = {"Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer"}
+
+
+async def login_page(request):
+    if session_of(request):
+        raise web.HTTPFound("/")
+    return web.FileResponse(STATIC / "login.html", headers=PAGE_HEADERS)
+
+
+async def login(request):
+    if not same_origin(request):
+        return jerr("origem ausente ou diferente", 403)
+    app = request.app
+    ip = request.remote or "?"
+    wait = app["limiter"].begin(ip)
+    if wait:
+        msg = f"{-(-wait // 60)} min" if wait > 60 else f"{wait} s"
+        return web.json_response({"error": f"Muitas tentativas. Tente de novo em {msg}."}, status=429,
+                                 headers={"Retry-After": str(wait)})
+    email, data = None, {}
+    try:
+        data = await body_json(request)
+        email = await asyncio.get_running_loop().run_in_executor(
+            None, auth.check_credentials, data.get("email"), data.get("password"))
+    finally:
+        app["limiter"].end(ip, bool(email))
+    if not email:
+        log.warning("login falhou para %r de %s", str(data.get("email", ""))[:100], ip)
+        return jerr("E-mail ou senha inválidos", 401)
+    log.info("login de %s a partir de %s", email, ip)
+    resp = web.json_response({"ok": True})
+    resp.set_cookie(auth.COOKIE, app["sessions"].create(email), max_age=app["sessions"].ttl_s, path="/",
+                    httponly=True, samesite="Strict", secure=request.secure)
+    return resp
+
+
+async def logout(request):
+    if not same_origin(request):
+        return jerr("origem ausente ou diferente", 403)
+    request.app["sessions"].destroy(request.cookies.get(auth.COOKIE))
+    resp = web.json_response({"ok": True})
+    resp.del_cookie(auth.COOKIE, path="/")
+    return resp
 
 
 async def health(request):
@@ -120,6 +192,7 @@ async def me(request):
     s: Store = request.app["store"]
     d = s.agent_dict(request["who"])
     d["admin"] = request["admin"]
+    d["user"] = request.get("user")
     d["unread"] = s.one("SELECT count(*) c FROM notifications WHERE agent_id=? AND read_at IS NULL",
                         (request["who"]["id"],))["c"]
     return web.json_response(d)
@@ -526,6 +599,9 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     app["settings"] = st
     app["store"] = Store(db_path or config.home() / "teams.db", st.get("human_name") or "humano")
     app["admin_token"] = config.admin_token(create=True)
+    app["sessions"] = auth.Sessions(ttl_s=float(st.get("session_ttl_hours", 168)) * 3600,
+                                    idle_s=float(st.get("session_idle_hours", 24)) * 3600)
+    app["limiter"] = auth.Limiter()
     app["subscribers"] = set()
     app["state"] = {"closing": False}
     app["cond"] = asyncio.Condition()
@@ -533,6 +609,9 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     app["allowed_hosts"] = LOCAL_HOSTS | set(extra_hosts)
     r = app.router
     r.add_get("/", index)
+    r.add_get("/login", login_page)
+    r.add_post("/api/login", login)
+    r.add_post("/api/logout", logout)
     r.add_static("/static/", STATIC)
     r.add_get("/api/health", health)
     r.add_get("/api/me", me)
@@ -563,28 +642,67 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     return app
 
 
+async def serve(app, hosts, port, retry_s=30):
+    """Listen on every host. The first one (localhost) must work; the others (e.g. the
+    Tailscale IP, which may come up after this service) are retried in the background."""
+    import signal
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, hosts[0], port).start()
+    log.info("escutando em %s:%s", hosts[0], port)
+    pending = list(hosts[1:])
+
+    async def retry():
+        while pending:
+            for h in list(pending):
+                try:
+                    await web.TCPSite(runner, h, port).start()
+                    pending.remove(h)
+                    log.info("escutando em %s:%s", h, port)
+                except OSError as e:
+                    log.warning("não deu para escutar em %s:%s (%s); nova tentativa em %ss", h, port, e, retry_s)
+            if pending:
+                await asyncio.sleep(retry_s)
+
+    task = asyncio.create_task(retry())
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+    task.cancel()
+    await runner.cleanup()
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Servidor AgenticTeams")
-    p.add_argument("--host", default=os.environ.get("AT_HOST", "127.0.0.1"))
+    p.add_argument("--host", action="append",
+                   help="endereço para escutar; repita para vários (ex.: --host 127.0.0.1 --host 100.x.y.z). "
+                        "O primeiro precisa funcionar; os outros são tentados de novo a cada 30 s. "
+                        "Padrão: $AT_HOST (separado por vírgula) ou 127.0.0.1")
     p.add_argument("--port", type=int, default=int(os.environ.get("AT_PORT", 8765)))
     p.add_argument("--db", help="arquivo SQLite (padrão: $AT_HOME/teams.db)")
     p.add_argument("--allow-host", action="append", default=[],
-                   help="nome de host extra aceito no cabeçalho Host (ex.: ao expor na rede; veja README)")
+                   help="nome extra aceito no cabeçalho Host (ex.: nome MagicDNS do Tailscale)")
     p.add_argument("--import-legacy", metavar="ARQUIVO",
                    help="importa (somente leitura) o agents.txt para a sala 'legado' e sai")
     a = p.parse_args(argv)
+    hosts = a.host or [h.strip() for h in os.environ.get("AT_HOST", "127.0.0.1").split(",") if h.strip()]
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    if a.host not in ("127.0.0.1", "localhost", "::1"):
-        print(f"AVISO: escutando em {a.host}. Qualquer máquina que alcance esta porta e tenha o token "
-              f"pode ler e escrever no chat. Veja README (Segurança).", file=sys.stderr)
-    url = f"http://{'127.0.0.1' if a.host in ('0.0.0.0', '::') else a.host}:{a.port}"
-    app = make_app(a.db, public_url=os.environ.get("AT_URL") or url, extra_hosts=a.allow_host)
+    remote = [h for h in hosts if h not in LOCAL_HOSTS]
+    if remote:
+        print(f"AVISO: escutando também em {', '.join(remote)}. Acessos de fora do localhost pedem o token "
+              f"de administrador na interface. Veja README (Acesso pela rede).", file=sys.stderr)
+    local = hosts[0] if hosts[0] not in ("0.0.0.0", "::") else "127.0.0.1"
+    url = f"http://{local}:{a.port}"
+    extra = set(a.allow_host) | {h for h in hosts if h not in ("0.0.0.0", "::")}
+    app = make_app(a.db, public_url=os.environ.get("AT_URL") or url, extra_hosts=extra)
     if a.import_legacy:
         n = len(legacy.import_file(app["store"], a.import_legacy))
         print(f"{n} mensagens importadas de {a.import_legacy} para #legado")
         return 0
-    print(f"AgenticTeams em {url}  (dados: {config.home()})", flush=True)
-    web.run_app(app, host=a.host, port=a.port, print=None, access_log=None)
+    print(f"AgenticTeams em {', '.join(f'http://{h}:{a.port}' for h in hosts)}  (dados: {config.home()})", flush=True)
+    asyncio.run(serve(app, hosts, a.port))
     return 0
 
 
