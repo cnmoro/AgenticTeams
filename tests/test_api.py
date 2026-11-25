@@ -421,3 +421,9 @@ def test_server_notices_in_portuguese(tmp_path, monkeypatch):
         assert srv.req("GET", "/api/settings", token=a)[1]["language"] == "pt"
     finally:
         srv.stop()
+
+
+def test_static_files_are_revalidated(env):
+    import urllib.request
+    with urllib.request.urlopen(env.url + "/static/app.js", timeout=10) as r:
+        assert r.headers["Cache-Control"] == "no-cache" and r.headers["ETag"]

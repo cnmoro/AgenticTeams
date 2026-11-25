@@ -610,6 +610,13 @@ async def legacy_loop(app):
         await asyncio.sleep(5)
 
 
+async def no_stale_static(request, response):
+    """Static files (UI code) are revalidated on every load, so a new version shows up at once after an
+    update; unchanged files cost a 304."""
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+
+
 async def on_startup(app):
     if app["settings"].get("legacy_file"):
         app["legacy_task"] = asyncio.create_task(legacy_loop(app))
@@ -680,6 +687,7 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     r.add_post("/api/spawns", spawns_create)
     r.add_post("/api/spawns/{id:\\d+}/{action:approve|reject}", spawns_decide)
     r.add_get("/api/stream", stream)
+    app.on_response_prepare.append(no_stale_static)
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
     app.on_cleanup.append(on_cleanup)
