@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgenticTeams</title>
+<title data-i18n="title.app">AgenticTeams</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,127 +11,128 @@
   <aside class="side">
     <div class="brand">
       <span class="logo">AT</span>
-      <div><strong>AgenticTeams</strong><small id="conn" class="conn off">conectando…</small></div>
-      <button class="ghost logout" id="btn-logout" title="Sair">Sair</button>
+      <div><strong>AgenticTeams</strong><small id="conn" class="conn off" data-i18n="conn.connecting">connecting…</small></div>
+      <button class="ghost logout" id="btn-logout" data-i18n-title="logout" data-i18n="logout" title="Log out">Log out</button>
     </div>
-    <input id="search" class="search" type="search" placeholder="Buscar em todas as salas…" autocomplete="off">
+    <input id="search" class="search" type="search" data-i18n-placeholder="search.placeholder" placeholder="Search all rooms…" autocomplete="off">
     <section>
-      <header><h2>Salas</h2><button class="icon" id="btn-new-room" title="Nova sala">+</button></header>
+      <header><h2 data-i18n="rooms">Rooms</h2><button class="icon" id="btn-new-room" data-i18n-title="rooms.new" title="New room">+</button></header>
       <ul id="rooms" class="list"></ul>
     </section>
     <section>
-      <header><h2>Agentes</h2></header>
+      <header><h2 data-i18n="agents">Agents</h2></header>
       <ul id="agents" class="list agents"></ul>
     </section>
     <div class="side-actions">
-      <button id="btn-tasks">Todas as tarefas <span id="tasks-count" class="badge muted"></span></button>
-      <button id="btn-spawns">Subagentes <span id="spawns-count" class="badge warn hidden"></span></button>
+      <button id="btn-tasks"><span data-i18n="tasks.all">All tasks</span> <span id="tasks-count" class="badge muted"></span></button>
+      <button id="btn-spawns"><span data-i18n="spawns">Subagents</span> <span id="spawns-count" class="badge warn hidden"></span></button>
     </div>
   </aside>
 
   <main class="main">
     <header class="room-head">
       <div class="room-title">
-        <h1 id="room-title">#geral</h1>
+        <h1 id="room-title">#general</h1>
         <p id="room-desc"></p>
       </div>
       <div id="room-members" class="members"></div>
-      <button id="btn-add-member" class="ghost" title="Adicionar agente à sala">+ membro</button>
-      <button id="btn-toggle-panel" class="ghost" title="Mostrar/ocultar tarefas">Tarefas</button>
+      <button id="btn-add-member" class="ghost" data-i18n-title="room.add_member_title" data-i18n="room.add_member" title="Add agent to room">+ member</button>
+      <button id="btn-toggle-panel" class="ghost" data-i18n-title="room.toggle_panel_title" data-i18n="room.toggle_panel" title="Show/hide tasks">Tasks</button>
     </header>
     <div id="messages" class="messages" aria-live="polite"></div>
     <form id="composer" class="composer">
-      <div id="reply-bar" class="reply-bar hidden"><span></span><button type="button" class="icon" id="reply-cancel">×</button></div>
+      <div id="reply-bar" class="reply-bar hidden"><span></span><button type="button" class="icon" id="reply-cancel" data-i18n-aria-label="cancel" aria-label="Cancel">×</button></div>
       <div class="composer-row">
-        <textarea id="input" rows="2" placeholder="Mensagem como humano — @ menciona um agente, @todos acorda a sala. Enter envia, Shift+Enter quebra linha."></textarea>
-        <button type="submit" class="primary">Enviar</button>
+        <textarea id="input" rows="2" data-i18n-placeholder="composer.placeholder" placeholder="Message as human — @ mentions an agent, @all wakes the room. Enter sends, Shift+Enter adds a line."></textarea>
+        <button type="submit" class="primary" data-i18n="composer.send">Send</button>
       </div>
       <ul id="mention-menu" class="mention-menu hidden" role="listbox"></ul>
     </form>
   </main>
 
   <aside class="panel" id="panel">
-    <header><h2>Tarefas da sala</h2></header>
+    <header><h2 data-i18n="tasks.room">Room tasks</h2></header>
     <form id="task-form" class="stack">
-      <input id="task-title" placeholder="Nova tarefa…" required>
+      <input id="task-title" data-i18n-placeholder="tasks.new_placeholder" placeholder="New task…" required>
       <div class="row">
-        <select id="task-assignee"><option value="">sem responsável</option></select>
-        <button class="primary" type="submit">Criar</button>
+        <select id="task-assignee"><option value="" data-i18n="tasks.no_assignee">no assignee</option></select>
+        <button class="primary" type="submit" data-i18n="tasks.create">Create</button>
       </div>
       <input id="task-source" type="hidden">
       <small id="task-source-label" class="muted"></small>
     </form>
-    <label class="check"><input type="checkbox" id="task-show-done"> mostrar concluídas</label>
+    <label class="check"><input type="checkbox" id="task-show-done"> <span data-i18n="tasks.show_done">show finished</span></label>
     <ul id="tasks" class="tasks"></ul>
   </aside>
 </div>
 
 <dialog id="dlg-room">
   <form method="dialog" id="room-form" class="stack">
-    <h2>Nova sala</h2>
-    <label>Nome (a-z, 0-9, -) <input name="name" required pattern="[a-z0-9][a-z0-9_-]{1,39}"></label>
-    <label>Título <input name="title"></label>
-    <label>Descrição <input name="description"></label>
-    <label>Tipo <select name="kind"><option value="projeto">projeto</option><option value="tema">tema</option></select></label>
-    <fieldset><legend>Membros</legend><div id="room-form-members" class="checks"></div></fieldset>
-    <menu><button value="cancel" formnovalidate>Cancelar</button><button class="primary" value="ok">Criar</button></menu>
+    <h2 data-i18n="room.new_title">New room</h2>
+    <label><span data-i18n="room.name">Name (a-z, 0-9, -)</span> <input name="name" required pattern="[a-z0-9][a-z0-9_-]{1,39}"></label>
+    <label><span data-i18n="room.title">Title</span> <input name="title"></label>
+    <label><span data-i18n="room.description">Description</span> <input name="description"></label>
+    <label><span data-i18n="room.kind">Kind</span> <select name="kind"><option value="project" data-i18n="kind.project">project</option><option value="topic" data-i18n="kind.topic">topic</option></select></label>
+    <fieldset><legend data-i18n="room.members">Members</legend><div id="room-form-members" class="checks"></div></fieldset>
+    <menu><button value="cancel" formnovalidate data-i18n="cancel">Cancel</button><button class="primary" value="ok" data-i18n="create">Create</button></menu>
   </form>
 </dialog>
 
 <dialog id="dlg-member">
   <form method="dialog" id="member-form" class="stack">
-    <h2>Adicionar agente à sala</h2>
+    <h2 data-i18n="member.title">Add agent to room</h2>
     <select name="agent" id="member-agent"></select>
-    <label>Notificação <select name="notify">
-      <option value="mentions">só menções (padrão)</option>
-      <option value="all">todas as mensagens da sala</option>
-      <option value="none">nenhuma (só menção direta)</option>
+    <label><span data-i18n="member.notify">Notifications</span> <select name="notify">
+      <option value="mentions" data-i18n="member.notify.mentions">mentions only (default)</option>
+      <option value="all" data-i18n="member.notify.all">every message in the room</option>
+      <option value="none" data-i18n="member.notify.none">none (direct mentions only)</option>
     </select></label>
-    <menu><button value="cancel" formnovalidate>Cancelar</button><button class="primary" value="ok">Adicionar</button></menu>
+    <menu><button value="cancel" formnovalidate data-i18n="cancel">Cancel</button><button class="primary" value="ok" data-i18n="member.add">Add</button></menu>
   </form>
 </dialog>
 
 <dialog id="dlg-tasks" class="wide">
   <div class="stack">
-    <header class="dlg-head"><h2>Todas as tarefas</h2>
-      <select id="all-tasks-filter"><option value="abertas">abertas</option><option value="">todas</option>
-      <option value="feita">feitas</option></select>
-      <button class="icon" data-close>×</button></header>
+    <header class="dlg-head"><h2 data-i18n="tasks.all">All tasks</h2>
+      <select id="all-tasks-filter"><option value="open_any" data-i18n="tasks.filter.open">open</option><option value="" data-i18n="tasks.filter.all">all</option>
+      <option value="done" data-i18n="tasks.filter.done">done</option></select>
+      <button class="icon" data-close data-i18n-aria-label="close" aria-label="Close">×</button></header>
     <ul id="all-tasks" class="tasks"></ul>
   </div>
 </dialog>
 
 <dialog id="dlg-spawns" class="wide">
   <div class="stack">
-    <header class="dlg-head"><h2>Subagentes</h2><button class="icon" data-close>×</button></header>
-    <p class="muted small">Inicia uma nova sessão <code>claude --bg</code> numa pasta permitida. A sessão entra no time com o nome
-      escolhido e recebe o hook que a acorda quando for mencionada. Raízes permitidas: <span id="spawn-roots"></span></p>
+    <header class="dlg-head"><h2 data-i18n="spawns">Subagents</h2><button class="icon" data-close data-i18n-aria-label="close" aria-label="Close">×</button></header>
+    <p class="muted small"><span data-i18n-html="spawn.intro">Starts a new <code>claude --bg</code> session in an allowed folder. The session joins
+      the team under the chosen name and gets the hook that wakes it when mentioned. Allowed roots: </span><span id="spawn-roots"></span></p>
     <form id="spawn-form" class="stack">
       <div class="row">
-        <label class="grow">Pasta <input name="folder" required placeholder="/mnt/dados1/projeto"></label>
-        <label>Nome <input name="name" required pattern="[a-z0-9][a-z0-9_-]{1,39}" placeholder="revisor-x"></label>
+        <label class="grow"><span data-i18n="spawn.folder">Folder</span> <input name="folder" required placeholder="/path/to/project"></label>
+        <label><span data-i18n="spawn.name">Name</span> <input name="name" required pattern="[a-z0-9][a-z0-9_-]{1,39}" placeholder="revisor-x"></label>
       </div>
       <div class="row">
-        <label class="grow">Salas <input name="rooms" placeholder="geral, proj-x"></label>
-        <label>Modo <select name="mode" id="spawn-mode"></select></label>
+        <label class="grow"><span data-i18n="spawn.rooms">Rooms</span> <input name="rooms" data-i18n-placeholder="spawn.rooms_placeholder" placeholder="general, proj-x"></label>
+        <label><span data-i18n="spawn.mode">Mode</span> <select name="mode" id="spawn-mode"></select></label>
       </div>
-      <label>Tarefa (prompt) <textarea name="prompt" rows="4" required></textarea></label>
-      <menu><button class="primary" type="submit">Iniciar subagente</button></menu>
+      <label><span data-i18n="spawn.prompt">Task (prompt)</span> <textarea name="prompt" rows="4" required></textarea></label>
+      <menu><button class="primary" type="submit" data-i18n="spawn.start">Start subagent</button></menu>
       <pre id="spawn-result" class="result hidden"></pre>
     </form>
-    <h3>Pedidos e histórico</h3>
+    <h3 data-i18n="spawn.history">Requests and history</h3>
     <ul id="spawns" class="spawns"></ul>
   </div>
 </dialog>
 
 <dialog id="dlg-search" class="wide">
   <div class="stack">
-    <header class="dlg-head"><h2 id="search-title">Busca</h2><button class="icon" data-close>×</button></header>
+    <header class="dlg-head"><h2 id="search-title" data-i18n="search.title">Search</h2><button class="icon" data-close data-i18n-aria-label="close" aria-label="Close">×</button></header>
     <div id="search-results" class="messages compact"></div>
   </div>
 </dialog>
 
 <div id="toast" class="toast hidden"></div>
+<script src="/static/i18n.js"></script>
 <script src="/static/markdown.js"></script>
 <script src="/static/app.js"></script>
 </body>

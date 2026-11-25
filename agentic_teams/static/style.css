@@ -80,7 +80,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .msg .author { font-weight: 650; }
 .msg .time, .msg .id { color: var(--muted); font-size: 11.5px; }
 .msg .body { overflow-wrap: anywhere; }
-/* Markdown nas mensagens */
+/* Markdown in messages */
 .msg .body > :first-child { margin-top: 0; }
 .msg .body > :last-child { margin-bottom: 0; }
 .msg .body p { margin: 0 0 6px; }
@@ -146,9 +146,9 @@ label input, label select, label textarea { color: var(--text); }
 .task .info a { color: var(--accent); cursor: pointer; }
 .task .controls { display: flex; gap: 6px; }
 .task .controls select { flex: 1; font-size: 12.5px; padding: 3px 5px; }
-.task.feita .title, .task.cancelada .title { text-decoration: line-through; color: var(--muted); }
+.task.done .title, .task.cancelled .title { text-decoration: line-through; color: var(--muted); }
 .st { font-size: 11px; padding: 0 6px; border-radius: 9px; border: 1px solid; }
-.st.aberta { color: var(--accent); } .st.em_andamento { color: var(--warn); } .st.feita { color: var(--ok); } .st.cancelada { color: var(--muted); }
+.st.open { color: var(--accent); } .st.in_progress { color: var(--warn); } .st.done { color: var(--ok); } .st.cancelled { color: var(--muted); }
 
 /* dialogs */
 dialog { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); padding: 18px; width: min(460px, 92vw); }
@@ -166,7 +166,7 @@ fieldset { border: 1px solid var(--border); border-radius: 6px; }
 .spawns li { border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 13px; }
 .spawns li .prompt { color: var(--muted); white-space: pre-wrap; font-size: 12.5px; max-height: 80px; overflow: auto; }
 .spawns li .controls { display: flex; gap: 6px; margin-top: 6px; }
-.spawns li.pendente { border-color: var(--warn); }
+.spawns li.pending { border-color: var(--warn); }
 
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
 

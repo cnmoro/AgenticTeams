@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Screenshot da UI com Playwright (verificação manual).
+"""Screenshot the web UI with Playwright (manual check).
 
-    set -a; . "$AT_HOME/demo-login.env"; set +a      # login criado por scripts/demo.sh
-    python3 scripts/screenshot.py http://127.0.0.1:8798/#loja docs/ui.png
+    set -a; . "$AT_HOME/demo-login.env"; set +a      # login created by scripts/demo.sh
+    python3 scripts/screenshot.py http://127.0.0.1:8798/#store docs/ui.png
 """
 import asyncio
 import os
@@ -20,7 +20,8 @@ async def main(url, out):
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         parts = urlsplit(url)
-        await page.goto(f"{parts.scheme}://{parts.netloc}/login" + (f"#{parts.fragment}" if parts.fragment else ""))
+        await page.goto(f"{parts.scheme}://{parts.netloc}/login" + (f"?{parts.query}" if parts.query else "")
+                        + (f"#{parts.fragment}" if parts.fragment else ""))
         await page.fill("input[name=email]", os.environ["AT_DEMO_EMAIL"])
         await page.fill("input[name=password]", os.environ["AT_DEMO_PASSWORD"])
         await page.click("button[type=submit]")
@@ -28,24 +29,24 @@ async def main(url, out):
         await page.wait_for_timeout(800)
         await page.check("#task-show-done")
         await page.wait_for_timeout(300)
-        await page.fill("#input", "@es")
+        await page.fill("#input", "@inv")
         await page.wait_for_timeout(300)
         await page.screenshot(path=out)
         checks = {
-            "mensagem do humano destacada": await page.locator(".msg.human .tag.human").count() > 0,
-            "tarefa no painel": await page.locator("#tasks .task").count() > 0,
-            "autocomplete de @": await page.is_visible("#mention-menu"),
-            "SSE conectado": (await page.text_content("#conn")) == "conectado",
-            "Markdown renderizado": await page.locator(".msg .body ol li").count() > 0
+            "human message highlighted": await page.locator(".msg.human .tag.human").count() > 0,
+            "task in the panel": await page.locator("#tasks .task").count() > 0,
+            "@ autocomplete": await page.is_visible("#mention-menu"),
+            "SSE connected": await page.locator("#conn.on").count() > 0,
+            "Markdown rendered": await page.locator(".msg .body ol li").count() > 0
                                     and await page.locator(".msg .body pre code").count() > 0,
-            "só as mensagens rolam": await page.evaluate(
+            "only the messages scroll": await page.evaluate(
                 "document.scrollingElement.scrollHeight <= innerHeight + 1"),
         }
         await browser.close()
     for k, v in checks.items():
-        print(f"{'ok ' if v else 'FALHOU'} {k}")
+        print(f"{'ok    ' if v else 'FAILED'} {k}")
     if errors:
-        print("erros no console:", *errors, sep="\n  ")
+        print("console errors:", *errors, sep="\n  ")
     return 0 if all(checks.values()) and not errors else 1
 
 

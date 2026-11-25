@@ -1,9 +1,9 @@
 "use strict";
-// Markdown pequeno e seguro para as mensagens do chat (sem dependências).
-// Todo texto é escapado ANTES de virar HTML; só as marcações abaixo geram tags:
-// blocos de código ```, `código`, **negrito**, *itálico*, ~~riscado~~, [link](http…), URLs soltas,
-// títulos #, listas (- * + e 1. 1)), citações >, tabelas com |, linha ---.
-// Quebras de linha simples viram <br> (no chat, cada Enter conta).
+// Small, safe Markdown for chat messages (no dependencies).
+// All text is escaped BEFORE it becomes HTML; only the markup below produces tags:
+// ``` code blocks, `code`, **bold**, *italic*, ~~strikethrough~~, [link](http…), bare URLs,
+// # headings, lists (- * + and 1. 1)), > quotes, | tables, --- rule.
+// Single line breaks become <br> (in chat, every Enter counts).
 (function (root) {
   const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ESC[c]);

@@ -1,14 +1,19 @@
 "use strict";
-// AgenticTeams — interface do usuário humano (JS puro, sem build).
+// AgenticTeams — web UI for the human user (plain JS, no build step).
+// Strings come from i18n.js via t(); English is the default.
 
-// A interface usa o cookie de sessão do login (/login); agentes e CLI usam Bearer token.
+// The UI uses the session cookie from /login; agents and the CLI use a Bearer token.
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const S = { settings: {}, me: null, rooms: [], agents: [], room: null, messages: [], tasks: [], spawns: [],
             replyTo: null, newCount: {} };
 
-const STATUS = { aberta: "aberta", em_andamento: "em andamento", feita: "feita", cancelada: "cancelada" };
-const KIND_LABEL = { geral: "geral", projeto: "projeto", tema: "tema", legado: "legado" };
+const STATUSES = ["open", "in_progress", "done", "cancelled"];
+const statusLabel = st => STATUSES.includes(st) ? t("status." + st) : st;
+const kindLabel = k => ["general", "project", "topic", "legacy"].includes(k) ? t("kind." + k) : k;
+const spawnStatusLabel = st => ["pending", "approved", "started", "error", "rejected"].includes(st) ? t("spawn_status." + st) : st;
+// Room-wide mention keyword offered in the @ menu (the server accepts both "all" and "todos").
+const allKeyword = () => currentLang() === "pt" ? "todos" : "all";
 
 async function api(method, path, body) {
   const r = await fetch(path, {
@@ -16,16 +21,16 @@ async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));
-  if (r.status === 401) { location.href = "/login" + location.hash; throw new Error("sessão expirada"); }
+  if (r.status === 401) { location.href = "/login" + location.search + location.hash; throw new Error(t("session_expired")); }
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }
 
 function toast(text, ms = 3500) {
-  const t = $("#toast"); t.textContent = text; t.classList.remove("hidden");
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), ms);
+  const box = $("#toast"); box.textContent = text; box.classList.remove("hidden");
+  clearTimeout(toast._t); toast._t = setTimeout(() => box.classList.add("hidden"), ms);
 }
-function fail(e) { console.error(e); toast("Erro: " + e.message, 6000); }
+function fail(e) { console.error(e); toast(t("error", { msg: e.message }), 6000); }
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -44,11 +49,11 @@ function el(tag, attrs = {}, ...kids) {
 function fmtTime(iso) {
   if (!iso) return "";
   const d = new Date(iso);
-  return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString(locale(), { hour: "2-digit", minute: "2-digit" });
 }
 function fmtDay(iso) {
   const d = new Date(iso);
-  return d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+  return d.toLocaleDateString(locale(), { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
 }
 function ago(iso) {
   if (!iso) return Infinity;
@@ -58,34 +63,37 @@ function mentionsHtml(escaped) {
   const me = S.settings.human_name;
   return escaped.replace(/(^|[^\w@/.])@([a-z0-9][a-z0-9_-]{1,39})/gi, (m, pre, name) => {
     const n = name.toLowerCase();
-    const known = n === "todos" || n === "sala" || S.agents.some(a => a.name === n);
+    const known = n === "all" || n === "todos" || n === "sala" || S.agents.some(a => a.name === n);
     if (!known) return m;
     return `${pre}<span class="mention${n === me ? " me" : ""}">@${esc(name)}</span>`;
   });
 }
-// Corpo da mensagem: Markdown (markdown.js escapa todo o HTML antes) + destaque de @menções.
+// Message body: Markdown (markdown.js escapes all HTML first) plus @mention highlighting.
 function bodyHtml(text) { return renderMarkdown(text, mentionsHtml); }
 function seenKey(room) { return "at.seen." + room; }
 function getSeen(room) { try { return +localStorage.getItem(seenKey(room)) || 0; } catch { return 0; } }
 function setSeen(room, id) { try { localStorage.setItem(seenKey(room), id); } catch {} }
 
-// ------------------------------------------------------------------ carregamento
+// ------------------------------------------------------------------ loading
 async function loadAll() {
   [S.settings, S.me] = await Promise.all([api("GET", "/api/settings"), api("GET", "/api/me")]);
+  setLang(S.settings.language); applyI18n();
   await Promise.all([loadAgents(), loadRooms(), loadSpawns(), loadTaskCount()]);
   const fromHash = decodeURIComponent(location.hash.slice(1));
-  const target = S.rooms.find(r => r.name === fromHash) ? fromHash : "geral";
+  const target = S.rooms.find(r => r.name === fromHash) ? fromHash
+    : (S.rooms.find(r => r.kind === "general") || S.rooms[0])?.name;
+  if (!target) return;
   await selectRoom(target);
 }
 async function loadAgents() { S.agents = await api("GET", "/api/agents"); renderAgents(); }
 async function loadRooms() { S.rooms = await api("GET", "/api/rooms"); renderRooms(); }
 async function loadSpawns() { S.spawns = await api("GET", "/api/spawns"); renderSpawns(); }
 async function loadTaskCount() {
-  const t = await api("GET", "/api/tasks?status=abertas");
-  $("#tasks-count").textContent = t.length || "";
+  const open = await api("GET", "/api/tasks?status=open_any");
+  $("#tasks-count").textContent = open.length || "";
 }
 
-// ------------------------------------------------------------------ salas
+// ------------------------------------------------------------------ rooms
 function renderRooms() {
   const ul = $("#rooms"); ul.replaceChildren();
   for (const r of S.rooms) {
@@ -94,9 +102,9 @@ function renderRooms() {
     ul.append(el("li", { class: (S.room?.name === r.name ? "active" : ""), onclick: () => selectRoom(r.name),
                          title: r.description || r.title },
       el("span", { class: "name", style: hasNew ? "font-weight:700" : "" }, "#" + r.name),
-      r.unread ? el("span", { class: "badge", title: "menções a você" }, "@" + r.unread) : null,
-      n ? el("span", { class: "badge muted", title: "mensagens novas" }, n) : null,
-      el("span", { class: "kind" }, r.kind !== "projeto" ? KIND_LABEL[r.kind] : "")));
+      r.unread ? el("span", { class: "badge", title: t("rooms.mentions") }, "@" + r.unread) : null,
+      n ? el("span", { class: "badge muted", title: t("rooms.new_messages") }, n) : null,
+      el("span", { class: "kind" }, r.kind !== "project" ? kindLabel(r.kind) : "")));
   }
 }
 
@@ -120,29 +128,29 @@ function renderRoomHead() {
   const m = $("#room-members"); m.replaceChildren();
   for (const x of r.members) {
     m.append(el("span", { class: "chip" + (x.notify === "all" ? " all" : ""),
-                          title: x.notify === "all" ? "recebe todas as mensagens" : (x.notify === "none" ? "só menção direta" : "recebe menções") },
+                          title: x.notify === "all" ? t("member.all") : (x.notify === "none" ? t("member.none") : t("member.mentions")) },
                  x.name));
   }
-  const legacy = r.kind === "legado";
+  const legacy = r.kind === "legacy";
   $("#composer").classList.toggle("disabled", legacy);
-  $("#input").placeholder = legacy ? "Sala legado: somente leitura (importada do agents.txt)."
-    : `Mensagem em #${r.name} como humano — @ menciona um agente, @todos acorda a sala. Enter envia, Shift+Enter quebra linha.`;
+  $("#input").placeholder = legacy ? t("composer.legacy")
+    : t("composer.placeholder_room", { room: r.name, all: allKeyword() });
   $("#btn-add-member").classList.toggle("hidden", legacy);
 }
 
-// ------------------------------------------------------------------ mensagens
+// ------------------------------------------------------------------ messages
 function msgEl(m) {
   const classes = ["msg"];
   if (m.author_kind === "human") classes.push("human");
   if (m.kind === "system" || m.author_kind === "system") classes.push("system");
   if (m.kind === "task") classes.push("tk");
   const tags = [];
-  if (m.author_kind === "human") tags.push(el("span", { class: "tag human", title: "mensagem do usuário humano" }, "humano"));
-  if (m.meta?.cross) tags.push(el("span", { class: "tag cross", title: "enviada por agente de fora da sala" }, "de fora"));
+  if (m.author_kind === "human") tags.push(el("span", { class: "tag human", title: t("msg.human_title") }, t("msg.human")));
+  if (m.meta?.cross) tags.push(el("span", { class: "tag cross", title: t("msg.cross_title") }, t("msg.cross")));
   if (m.kind === "legacy") tags.push(el("span", { class: "tag legacy" }, "agents.txt"));
   const ag = S.agents.find(a => a.name === m.author);
   const node = el("div", { class: classes.join(" "), id: "m" + m.id, "data-id": m.id },
-    m.reply_to ? el("div", { class: "reply", onclick: () => flash(m.reply_to) }, "↪ em resposta a #" + m.reply_to) : null,
+    m.reply_to ? el("div", { class: "reply", onclick: () => flash(m.reply_to) }, t("msg.in_reply_to", { id: m.reply_to })) : null,
     el("div", { class: "meta" },
       el("span", { class: "author", title: ag?.handle || m.author }, m.author), ...tags,
       el("span", { class: "time", title: m.created_at }, fmtTime(m.created_at)),
@@ -150,15 +158,15 @@ function msgEl(m) {
     el("div", { class: "body", html: bodyHtml(m.body) }));
   if (m.kind !== "legacy") {
     node.append(el("div", { class: "actions" },
-      el("button", { onclick: () => setReply(m), title: "Responder a esta mensagem" }, "Responder"),
-      el("button", { onclick: () => taskFromMessage(m), title: "Criar tarefa a partir desta mensagem" }, "Tarefa")));
+      el("button", { onclick: () => setReply(m), title: t("msg.reply_title") }, t("msg.reply")),
+      el("button", { onclick: () => taskFromMessage(m), title: t("msg.task_title") }, t("msg.task"))));
   }
   return node;
 }
 
 function renderMessages(scroll) {
   const box = $("#messages"); box.replaceChildren();
-  if (!S.messages.length) { box.append(el("div", { class: "empty" }, "Nenhuma mensagem nesta sala ainda.")); return; }
+  if (!S.messages.length) { box.append(el("div", { class: "empty" }, t("msg.empty"))); return; }
   let day = "";
   for (const m of S.messages) {
     const d = (m.created_at || "").slice(0, 10);
@@ -183,7 +191,7 @@ function appendMessage(m) {
 
 function flash(id) {
   const n = document.getElementById("m" + id);
-  if (!n) { toast("Mensagem #" + id + " não está carregada nesta sala."); return; }
+  if (!n) { toast(t("msg.not_loaded", { id })); return; }
   n.scrollIntoView({ block: "center", behavior: "smooth" });
   n.classList.remove("flash"); void n.offsetWidth; n.classList.add("flash");
 }
@@ -191,7 +199,7 @@ function flash(id) {
 function setReply(m) {
   S.replyTo = m.id;
   const bar = $("#reply-bar"); bar.classList.remove("hidden");
-  bar.querySelector("span").textContent = `Respondendo a #${m.id} de ${m.author}: ${m.body.slice(0, 80)}`;
+  bar.querySelector("span").textContent = t("reply.to", { id: m.id, author: m.author, text: m.body.slice(0, 80) });
   if (m.author_kind === "agent" && !$("#input").value.includes("@" + m.author)) $("#input").value = "@" + m.author + " " + $("#input").value;
   $("#input").focus();
 }
@@ -208,12 +216,12 @@ async function send(e) {
   } catch (err) { fail(err); }
 }
 
-// ------------------------------------------------------------------ autocomplete de @
+// ------------------------------------------------------------------ @ autocomplete
 const menu = { open: false, items: [], sel: 0, start: 0 };
 function mentionCandidates(prefix) {
   const p = prefix.toLowerCase();
   const inRoom = new Set((S.room?.members || []).map(m => m.name));
-  const list = [{ name: "todos", info: "acorda todos os membros da sala" },
+  const list = [{ name: allKeyword(), info: t("mention.all"), everyone: true },
                 ...S.agents.filter(a => a.kind === "agent").map(a => ({ name: a.name, info: a.folder || "", room: inRoom.has(a.name), online: ago(a.last_seen) < 120 }))];
   return list.filter(x => x.name.startsWith(p) || (p.length > 1 && x.name.includes(p)))
              .sort((a, b) => (b.room ? 1 : 0) - (a.room ? 1 : 0)).slice(0, 10);
@@ -230,9 +238,9 @@ function updateMenu() {
   const ul = $("#mention-menu"); ul.replaceChildren();
   menu.items.forEach((it, i) => ul.append(el("li", { class: i === menu.sel ? "sel" : "", role: "option",
       onmousedown: ev => { ev.preventDefault(); pickMention(i); } },
-    it.name === "todos" ? "" : el("span", { class: "dot" + (it.online ? " on" : "") }),
+    it.everyone ? "" : el("span", { class: "dot" + (it.online ? " on" : "") }),
     el("strong", {}, "@" + it.name),
-    it.room === false ? el("span", { class: "tag cross", title: "não é membro desta sala; recebe mesmo assim" }, "fora") : null,
+    it.room === false ? el("span", { class: "tag cross", title: t("mention.outside_title") }, t("mention.outside")) : null,
     el("small", {}, it.info))));
   ul.classList.remove("hidden"); menu.open = true;
 }
@@ -245,53 +253,54 @@ function pickMention(i) {
   input.setSelectionRange(pos, pos); closeMenu(); input.focus();
 }
 
-// ------------------------------------------------------------------ agentes
+// ------------------------------------------------------------------ agents
 function renderAgents() {
   const ul = $("#agents"); ul.replaceChildren();
   const people = S.agents.filter(a => a.kind === "agent" || a.kind === "human");
   for (const a of people) {
     const s = ago(a.last_seen);
     const dot = a.kind === "human" ? "human" : (s < 120 ? "on" : s < 1800 ? "idle" : "");
-    const status = a.kind === "human" ? "você (humano)" : (s < 120 ? "online (vigia ativo)" : a.last_seen ? "visto " + new Date(a.last_seen).toLocaleString("pt-BR") : "nunca visto");
-    ul.append(el("li", { title: `${a.handle}\n${status}\nsalas: ${a.rooms.join(", ")}` },
+    const status = a.kind === "human" ? t("agents.you") : (s < 120 ? t("agents.online")
+      : a.last_seen ? t("agents.seen", { when: new Date(a.last_seen).toLocaleString(locale()) }) : t("agents.never"));
+    ul.append(el("li", { title: `${a.handle}\n${status}\n${t("agents.rooms", { rooms: a.rooms.join(", ") })}` },
       el("span", { class: "dot " + dot }),
       el("span", { class: "name" }, a.name, a.folder ? el("span", { class: "folder" }, a.folder) : null)));
   }
-  if (!people.some(a => a.kind === "agent")) ul.append(el("li", { class: "muted small" }, "nenhum agente registrado"));
+  if (!people.some(a => a.kind === "agent")) ul.append(el("li", { class: "muted small" }, t("agents.none")));
   const legacy = S.agents.filter(a => a.kind === "legacy").length;
-  if (legacy) ul.append(el("li", { class: "muted small", title: "autores importados do agents.txt" }, `+ ${legacy} do agents.txt`));
+  if (legacy) ul.append(el("li", { class: "muted small", title: t("agents.legacy_title") }, t("agents.legacy", { n: legacy })));
 }
 
-// ------------------------------------------------------------------ tarefas
+// ------------------------------------------------------------------ tasks
 async function loadRoomTasks() {
   if (!S.room) return;
   const showDone = $("#task-show-done").checked;
-  S.tasks = await api("GET", `/api/tasks?room=${S.room.name}${showDone ? "" : "&status=abertas"}`);
+  S.tasks = await api("GET", `/api/tasks?room=${S.room.name}${showDone ? "" : "&status=open_any"}`);
   renderTaskList($("#tasks"), S.tasks, false);
-  const sel = $("#task-assignee"); const cur = sel.value; sel.replaceChildren(el("option", { value: "" }, "sem responsável"));
+  const sel = $("#task-assignee"); const cur = sel.value; sel.replaceChildren(el("option", { value: "" }, t("tasks.no_assignee")));
   for (const a of S.agents.filter(a => a.kind === "agent" || a.kind === "human"))
-    sel.append(el("option", { value: a.name }, a.name + (S.room.members.some(m => m.name === a.name) ? "" : " (fora da sala)")));
+    sel.append(el("option", { value: a.name }, a.name + (S.room.members.some(m => m.name === a.name) ? "" : t("tasks.outside_room"))));
   sel.value = cur;
 }
 
 function renderTaskList(ul, tasks, showRoom) {
   ul.replaceChildren();
-  if (!tasks.length) { ul.append(el("li", { class: "muted small" }, "Nenhuma tarefa.")); return; }
-  for (const t of tasks) {
-    const statusSel = el("select", { onchange: e => patchTask(t.id, { status: e.target.value }) },
-      ...Object.entries(STATUS).map(([v, l]) => el("option", { value: v, selected: v === t.status ? "" : null }, l)));
-    const whoSel = el("select", { onchange: e => patchTask(t.id, { assignee: e.target.value }) },
-      el("option", { value: "" }, "sem responsável"),
+  if (!tasks.length) { ul.append(el("li", { class: "muted small" }, t("tasks.none"))); return; }
+  for (const task of tasks) {
+    const statusSel = el("select", { onchange: e => patchTask(task.id, { status: e.target.value }) },
+      ...STATUSES.map(v => el("option", { value: v, selected: v === task.status ? "" : null }, statusLabel(v))));
+    const whoSel = el("select", { onchange: e => patchTask(task.id, { assignee: e.target.value }) },
+      el("option", { value: "" }, t("tasks.no_assignee")),
       ...S.agents.filter(a => a.kind === "agent" || a.kind === "human")
-        .map(a => el("option", { value: a.name, selected: a.name === t.assignee ? "" : null }, a.name)));
-    ul.append(el("li", { class: "task " + t.status },
-      el("div", { class: "title" }, `#${t.id} ${t.title}`),
-      t.body ? el("div", { class: "small muted" }, t.body) : null,
+        .map(a => el("option", { value: a.name, selected: a.name === task.assignee ? "" : null }, a.name)));
+    ul.append(el("li", { class: "task " + task.status },
+      el("div", { class: "title" }, `#${task.id} ${task.title}`),
+      task.body ? el("div", { class: "small muted" }, task.body) : null,
       el("div", { class: "info" },
-        el("span", { class: "st " + t.status }, STATUS[t.status]),
-        showRoom ? el("a", { onclick: () => { $("#dlg-tasks").close(); selectRoom(t.room); } }, "#" + t.room) : null,
-        el("span", {}, "por " + t.creator),
-        t.source_message_id ? el("a", { onclick: () => gotoMessage(t.room, t.source_message_id) }, "origem #" + t.source_message_id) : null),
+        el("span", { class: "st " + task.status }, statusLabel(task.status)),
+        showRoom ? el("a", { onclick: () => { $("#dlg-tasks").close(); selectRoom(task.room); } }, "#" + task.room) : null,
+        el("span", {}, t("tasks.by", { who: task.creator })),
+        task.source_message_id ? el("a", { onclick: () => gotoMessage(task.room, task.source_message_id) }, t("tasks.source", { id: task.source_message_id })) : null),
       el("div", { class: "controls" }, statusSel, whoSel)));
   }
 }
@@ -303,7 +312,7 @@ async function patchTask(id, body) {
 function taskFromMessage(m) {
   document.querySelector(".app").classList.remove("no-panel");
   $("#task-source").value = m.id;
-  $("#task-source-label").textContent = `vinculada à mensagem #${m.id} de ${m.author}`;
+  $("#task-source-label").textContent = t("tasks.linked", { id: m.id, author: m.author });
   $("#task-title").value = m.body.replace(/\s+/g, " ").slice(0, 100);
   if (m.author_kind === "agent") $("#task-assignee").value = m.author;
   $("#task-title").focus(); $("#task-title").select();
@@ -331,33 +340,34 @@ async function openAllTasks() {
   if (!$("#dlg-tasks").open) $("#dlg-tasks").showModal();
 }
 
-// ------------------------------------------------------------------ subagentes
+// ------------------------------------------------------------------ subagents
 function renderSpawns() {
-  const pending = S.spawns.filter(s => s.status === "pendente").length;
+  const pending = S.spawns.filter(s => s.status === "pending").length;
   const b = $("#spawns-count"); b.textContent = pending; b.classList.toggle("hidden", !pending);
   const ul = $("#spawns"); ul.replaceChildren();
-  if (!S.spawns.length) ul.append(el("li", { class: "muted" }, "Nenhum subagente ainda."));
+  if (!S.spawns.length) ul.append(el("li", { class: "muted" }, t("spawn.none")));
   for (const s of S.spawns) {
     ul.append(el("li", { class: s.status },
-      el("div", {}, el("strong", {}, `#${s.id} ${s.agent_name}`), ` em `, el("code", {}, s.folder),
-         ` — ${s.status} · pedido por ${s.requested_by} · modo ${s.permission_mode} · ${new Date(s.created_at).toLocaleString("pt-BR")}`),
+      el("div", {}, el("strong", {}, `#${s.id} ${s.agent_name}`), t("spawn.in"), el("code", {}, s.folder),
+         t("spawn.line", { status: spawnStatusLabel(s.status), who: s.requested_by, mode: s.permission_mode,
+                           when: new Date(s.created_at).toLocaleString(locale()) })),
       el("div", { class: "prompt" }, s.prompt),
       s.output ? el("pre", { class: "result" }, s.output) : null,
-      s.status === "pendente" ? el("div", { class: "controls" },
-        el("button", { class: "primary", onclick: () => decideSpawn(s.id, "approve") }, "Aprovar e iniciar"),
-        el("button", { onclick: () => decideSpawn(s.id, "reject") }, "Recusar")) : null));
+      s.status === "pending" ? el("div", { class: "controls" },
+        el("button", { class: "primary", onclick: () => decideSpawn(s.id, "approve") }, t("spawn.approve")),
+        el("button", { onclick: () => decideSpawn(s.id, "reject") }, t("spawn.reject"))) : null));
   }
 }
 async function decideSpawn(id, action) {
-  try { const s = await api("POST", `/api/spawns/${id}/${action}`); toast(`Subagente #${id}: ${s.status}`); await loadSpawns(); }
+  try { const s = await api("POST", `/api/spawns/${id}/${action}`); toast(t("spawn.result", { id, status: spawnStatusLabel(s.status) })); await loadSpawns(); }
   catch (e) { fail(e); }
 }
 function openSpawns() {
   const roots = S.settings.spawn_roots || [];
-  $("#spawn-roots").textContent = roots.length ? roots.join(", ") : "nenhuma (invocação desativada; configure spawn_roots)";
+  $("#spawn-roots").textContent = roots.length ? roots.join(", ") : t("spawn.no_roots");
   const mode = $("#spawn-mode"); mode.replaceChildren(...S.settings.spawn_permission_modes.map(m => el("option", { value: m }, m)));
   const form = $("#spawn-form");
-  if (!form.rooms.value && S.room && S.room.kind !== "legado") form.rooms.value = S.room.name;
+  if (!form.rooms.value && S.room && S.room.kind !== "legacy") form.rooms.value = S.room.name;
   $("#dlg-spawns").showModal();
 }
 async function submitSpawn(e) {
@@ -367,18 +377,18 @@ async function submitSpawn(e) {
   try {
     const s = await api("POST", "/api/spawns", { folder: f.folder.value.trim(), name: f.name.value.trim(), prompt: f.prompt.value,
       rooms: f.rooms.value.split(",").map(x => x.trim()).filter(Boolean), permission_mode: f.mode.value });
-    out.textContent = `#${s.id} ${s.status}\n${s.output || ""}`; out.classList.remove("hidden");
-    if (s.status === "iniciado") { f.name.value = ""; f.prompt.value = ""; }
+    out.textContent = `#${s.id} ${spawnStatusLabel(s.status)}\n${s.output || ""}`; out.classList.remove("hidden");
+    if (s.status === "started") { f.name.value = ""; f.prompt.value = ""; }
     await Promise.all([loadSpawns(), loadAgents()]);
-  } catch (err) { out.textContent = "Erro: " + err.message; out.classList.remove("hidden"); }
+  } catch (err) { out.textContent = t("error", { msg: err.message }); out.classList.remove("hidden"); }
 }
 
-// ------------------------------------------------------------------ busca
+// ------------------------------------------------------------------ search
 async function doSearch(text) {
   const res = await api("GET", "/api/search?q=" + encodeURIComponent(text));
-  $("#search-title").textContent = `Busca: “${text}” (${res.length})`;
+  $("#search-title").textContent = t("search.results", { q: text, n: res.length });
   const box = $("#search-results"); box.replaceChildren();
-  if (!res.length) box.append(el("div", { class: "empty" }, "Nada encontrado."));
+  if (!res.length) box.append(el("div", { class: "empty" }, t("search.none")));
   for (const m of res) {
     const n = msgEl(m); n.querySelector(".actions")?.remove();
     n.querySelector(".meta").prepend(el("span", { class: "chip" }, "#" + m.room));
@@ -389,12 +399,12 @@ async function doSearch(text) {
   if (!$("#dlg-search").open) $("#dlg-search").showModal();
 }
 
-// ------------------------------------------------------------------ diálogos de sala
+// ------------------------------------------------------------------ room dialogs
 function openNewRoom() {
   const box = $("#room-form-members"); box.replaceChildren();
   for (const a of S.agents.filter(a => a.kind === "agent"))
     box.append(el("label", { class: "check" }, el("input", { type: "checkbox", value: a.name }), a.name));
-  if (!box.children.length) box.append(el("span", { class: "muted small" }, "Nenhum agente registrado ainda."));
+  if (!box.children.length) box.append(el("span", { class: "muted small" }, t("room.no_agents")));
   $("#room-form").reset(); $("#dlg-room").showModal();
 }
 async function submitRoom(e) {
@@ -411,7 +421,7 @@ function openAddMember() {
   const inRoom = new Set(S.room.members.map(m => m.name));
   const sel = $("#member-agent"); sel.replaceChildren();
   for (const a of S.agents.filter(a => a.kind === "agent" && !inRoom.has(a.name))) sel.append(el("option", { value: a.name }, a.name));
-  if (!sel.children.length) { toast("Todos os agentes já estão nesta sala."); return; }
+  if (!sel.children.length) { toast(t("member.all_in")); return; }
   $("#dlg-member").showModal();
 }
 async function submitMember(e) {
@@ -424,12 +434,12 @@ async function submitMember(e) {
   } catch (err) { fail(err); }
 }
 
-// ------------------------------------------------------------------ tempo real (SSE)
+// ------------------------------------------------------------------ real time (SSE)
 function connect() {
   const es = new EventSource("/api/stream");
   const conn = $("#conn");
-  es.addEventListener("hello", () => { conn.textContent = "conectado"; conn.className = "conn on"; });
-  es.onerror = () => { conn.textContent = "reconectando…"; conn.className = "conn off"; };
+  es.addEventListener("hello", () => { conn.textContent = t("conn.connected"); conn.className = "conn on"; });
+  es.onerror = () => { conn.textContent = t("conn.reconnecting"); conn.className = "conn off"; };
   es.addEventListener("message", ev => {
     const m = JSON.parse(ev.data);
     const r = S.rooms.find(x => x.name === m.room);
@@ -439,7 +449,7 @@ function connect() {
       if (m.mentions.includes(S.settings.human_name)) api("POST", "/api/inbox/read", { room: m.room }).catch(() => {});
     } else {
       S.newCount[m.room] = (S.newCount[m.room] || 0) + 1;
-      if (r && m.mentions.includes(S.settings.human_name)) { r.unread = (r.unread || 0) + 1; toast(`${m.author} mencionou você em #${m.room}`); }
+      if (r && m.mentions.includes(S.settings.human_name)) { r.unread = (r.unread || 0) + 1; toast(t("msg.mentioned_you", { author: m.author, room: m.room })); }
       renderRooms();
     }
   });
@@ -453,7 +463,7 @@ function connect() {
   es.addEventListener("spawn", () => loadSpawns().catch(fail));
 }
 
-// ------------------------------------------------------------------ eventos da página
+// ------------------------------------------------------------------ page events
 function bind() {
   $("#composer").addEventListener("submit", send);
   $("#btn-logout").addEventListener("click", async () => {
@@ -492,5 +502,6 @@ function bind() {
   setInterval(() => loadAgents().catch(() => {}), 30000);
 }
 
+applyI18n();
 bind();
 loadAll().then(connect).catch(fail);
