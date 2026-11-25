@@ -28,6 +28,9 @@ def test_cli_full_flow(env):
     assert "menciona: beta" in out
     # multi-line message from stdin
     run("--as", "alfa", "say", "-r", "proj-x", "-", stdin="linha 1\nlinha 2 @beta\n")
+    p = run("--as", "alfa", "say", "-r", "proj-x", "x" * 300)
+    assert "dica: mensagem longa numa linha" in p.stderr
+    assert "dica" not in run("--as", "alfa", "say", "-r", "proj-x", "-", stdin="a\n" + "x" * 300).stderr
     inbox = run("--as", "beta", "inbox").stdout
     assert "#proj-x" in inbox and "<mention>" in inbox and "    linha 2 @beta" in inbox
     assert "nenhuma mensagem nova" in run("--as", "beta", "inbox").stdout  # marked as read
@@ -111,7 +114,7 @@ def test_watch_wakes_on_mention_only(env):
     p.wait(15)
     err = p.stderr.read()
     assert p.returncode == 2
-    assert "@beta preciso de você" in err and "aviso geral" not in err and "--as beta say" in err
+    assert "@beta preciso de você" in err and "<<'EOF'" in err and "aviso geral" not in err and "--as beta say" in err
     assert "#geral: @alfa" in err  # roster of the rooms, to know whom to mention
     # next run of the same session continues from the cursor and keeps waiting
     p2 = watch("beta", "s1")

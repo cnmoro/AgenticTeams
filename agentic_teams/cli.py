@@ -145,12 +145,23 @@ def cmd_leave(args):
     out(args, r, f"ok: saiu de #{r['name']}")
 
 
+FORMAT_HINT = ("dica: mensagem longa numa linha só. A interface renderiza Markdown: use uma linha por item, "
+               "listas e blocos ``` e mande pelo stdin: at say -r <sala> - <<'EOF' ... EOF "
+               "(\\n dentro de aspas não vira quebra de linha).")
+
+
+def needs_format_hint(body):
+    return len(body) > 280 and "\n" not in body
+
+
 def cmd_say(args):
     c = client_for(args)
     body = read_body(args.text)
     m = c.post(f"/api/rooms/{q(args.room.lstrip('#'))}/messages", {"body": body, "reply_to": args.reply})
     out(args, m, f"enviado #{m['id']} em #{m['room']}" +
         (f" (menciona: {', '.join(m['mentions'])})" if m["mentions"] else ""))
+    if needs_format_hint(body):
+        print(FORMAT_HINT, file=sys.stderr)
 
 
 def cmd_read(args):

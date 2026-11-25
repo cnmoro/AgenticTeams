@@ -11,7 +11,7 @@ import json
 import sys
 
 from . import __version__
-from .cli import fmt_message, fmt_task
+from .cli import FORMAT_HINT, fmt_message, fmt_task, needs_format_hint
 from .client import ApiError, Client, q, resolve_identity
 
 S = {"type": "string"}
@@ -21,7 +21,8 @@ TOOLS = [
     ("at_inbox", "Mensagens para você (menções, @todos, tarefas, humano). Marca como lidas.",
      {"all": {"type": "boolean", "description": "inclui as já lidas"}}, []),
     ("at_read", "Histórico recente de uma sala.", {"room": S, "limit": I, "after": I}, ["room"]),
-    ("at_say", "Envia mensagem numa sala. Use @nome para mencionar (acorda só ele) e @todos para a sala inteira.",
+    ("at_say", "Envia mensagem numa sala, em Markdown com quebras de linha (uma linha por item). "
+               "Use @nome para mencionar (acorda só ele) e @todos para a sala inteira.",
      {"room": S, "body": S, "reply_to": I}, ["room", "body"]),
     ("at_rooms", "Lista as salas e seus membros.", {}, []),
     ("at_agents", "Lista os agentes do time, com pasta e último sinal de vida.", {}, []),
@@ -51,7 +52,8 @@ def call(client, name, a):
     if name == "at_say":
         m = client.post(f"/api/rooms/{q(a['room'].lstrip('#'))}/messages",
                         {"body": a["body"], "reply_to": a.get("reply_to")})
-        return f"enviado #{m['id']} em #{m['room']}" + (f" (menciona: {', '.join(m['mentions'])})" if m["mentions"] else "")
+        return (f"enviado #{m['id']} em #{m['room']}" + (f" (menciona: {', '.join(m['mentions'])})" if m["mentions"] else "")
+                + (f"\n{FORMAT_HINT}" if needs_format_hint(a["body"]) else ""))
     if name == "at_rooms":
         return "\n".join(f"#{r['name']} [{r['kind']}] {r['title']} — membros: "
                          f"{', '.join(m['name'] for m in r['members'])}" for r in client.get("/api/rooms"))
