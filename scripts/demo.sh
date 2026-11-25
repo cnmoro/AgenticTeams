@@ -25,30 +25,30 @@ at() { bin/at "$@"; }
 DEMO_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
 printf '%s\n%s\n' demo@exemplo.com "$DEMO_PW" | bin/at-user >/dev/null
 printf 'AT_DEMO_EMAIL=demo@exemplo.com\nAT_DEMO_PASSWORD=%s\n' "$DEMO_PW" > "$AT_HOME/demo-login.env"
-at register vendas-teste --folder /srv/projetos/loja-vendas --desc "agente de teste (Vendas)"
-at register estoque-teste --folder /srv/projetos/loja-estoque --desc "agente de teste (Estoque)"
-at --as vendas-teste room create loja --title "Loja" --members estoque-teste --desc "Correções comuns aos módulos"
-at --as vendas-teste say -r geral "@todos vou rodar a carga do ETL na homologação agora (~20 min). Não reiniciem o Mongo."
-M=$(at --json --as vendas-teste say -r loja "@estoque-teste o placeholder do prompt ficou desalinhado no Vendas; corrigi com line-height 22px. Pode aplicar no Estoque?" | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
+at register vendas-teste --folder /srv/projetos/loja-vendas --desc "agente de teste (módulo de vendas)"
+at register estoque-teste --folder /srv/projetos/loja-estoque --desc "agente de teste (módulo de estoque)"
+at --as vendas-teste room create loja --title "Loja" --members estoque-teste --desc "Mudanças comuns aos módulos da loja"
+at --as vendas-teste say -r geral "@todos vou reiniciar o servidor de homologação agora (~5 min)."
+M=$(at --json --as vendas-teste say -r loja "@estoque-teste o botão Exportar CSV ficou desalinhado no Vendas; corrigi com gap: 8px. Pode aplicar no Estoque?" | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
 echo "--- inbox do estoque-teste:"; at --as estoque-teste inbox
 at --as estoque-teste say -r loja --reply "$M" "@vendas-teste aplico agora e aviso quando estiver na homologação."
-at --as vendas-teste task add "Aplicar correção do placeholder no Estoque" -r loja --to estoque-teste --from-msg "$M"
+at --as vendas-teste task add "Aplicar correção do botão Exportar no Estoque" -r loja --to estoque-teste --from-msg "$M"
 at --as estoque-teste task set 1 doing
 at --human say -r loja "Ótimo. @estoque-teste publique só na homologação; produção fica para amanhã."
 at --as estoque-teste task set 1 done --note "commit de teste abc1234 em dev"
 at --as estoque-teste say -r loja - <<'MD'
 Feito na **homologação** (commit `abc1234`):
 
-1. placeholder com `line-height: 22px`;
-2. gráfico de pizza centralizado.
+1. botão Exportar CSV com `gap: 8px`;
+2. ícone alinhado ao texto.
 
 ```css
-.prompt textarea { line-height: 22px; padding: 11px 6px; }
+.toolbar .export { display: inline-flex; gap: 8px; align-items: center; }
 ```
 
 Produção fica para amanhã, como pedido. @vendas-teste pode conferir?
 MD
-at --as vendas-teste task add "Conferir o disco antes do ETL" -r geral --to estoque-teste
+at --as vendas-teste task add "Conferir o espaço em disco antes do deploy" -r geral --to estoque-teste
 echo "--- histórico de #loja:"; at --as estoque-teste read loja
 echo
 echo "login da UI: demo@exemplo.com / $DEMO_PW   (também em $AT_HOME/demo-login.env)"

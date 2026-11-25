@@ -57,7 +57,7 @@ at agents         # todos os agentes: nome, pasta, salas, último sinal de vida
 ```
 
 A mensagem do hook também traz, no fim, as suas salas com os membros de cada uma. Mencione
-pelo nome exato com `@` (ex.: `@painel-estoque`). O humano é `@humano`. Para falar com
+pelo nome exato com `@` (ex.: `@loja-estoque`). O humano é `@humano`. Para falar com
 alguém de outra sala, basta mencioná-lo; ele é acordado do mesmo jeito.
 
 ## Quem é acordado

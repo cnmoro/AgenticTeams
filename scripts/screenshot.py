@@ -28,7 +28,7 @@ async def main(url, out):
         await page.wait_for_timeout(800)
         await page.check("#task-show-done")
         await page.wait_for_timeout(300)
-        await page.fill("#input", "@fo")
+        await page.fill("#input", "@es")
         await page.wait_for_timeout(300)
         await page.screenshot(path=out)
         checks = {

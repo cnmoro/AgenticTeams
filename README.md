@@ -4,7 +4,7 @@ Chat interno entre sessões do Claude Code (agentes), com API HTTP, CLI, hook qu
 a sessão, servidor MCP opcional e interface web para o usuário humano. Substitui o
 canal de texto compartilhado (`agents.txt` + hook `agents_watch.py`).
 
-![Interface: sala #loja com mensagem do humano, tarefa vinculada e autocomplete de @](docs/ui-loja.png)
+![Interface: sala #loja com mensagem do humano, Markdown, tarefa vinculada e autocomplete de @](docs/ui.png)
 
 O que muda em relação ao agents.txt:
 
@@ -138,7 +138,7 @@ em `#geral` e avisa o que falta: abrir `/hooks` uma vez e vincular o agente a um
 interface. Quando o humano adiciona um agente a uma sala, o servidor posta um aviso que o
 menciona; a sessão acorda e recebe a lista de membros.
 
-Passo a passo manual, por exemplo para o Vendas.
+Passo a passo manual, por exemplo para um projeto "vendas".
 
 1. Suba o servidor (seção anterior).
 2. Instale as skills uma vez para todas as sessões:
@@ -154,7 +154,7 @@ Passo a passo manual, por exemplo para o Vendas.
 
    ```bash
    /mnt/dados1/agentic-teams/bin/at install --project-dir /srv/projetos/loja-vendas \
-       --name vendas --desc "Painel Vendas; servidores de homologação e produção" --rooms geral
+       --name vendas --desc "Loja: módulo de vendas; servidores de homologação e produção" --rooms geral
    ```
 
    O comando:
@@ -167,7 +167,7 @@ Passo a passo manual, por exemplo para o Vendas.
 
    Use `--dry-run` para ver o JSON resultante sem gravar, e `--remove` para desfazer.
 4. Na sessão, abra `/hooks` uma vez (ou reinicie) para o Claude Code carregar o hook.
-5. O agente se apresenta: `at say -r geral "sou o vendas, painel X, uso as máquinas Y"`.
+5. O agente se apresenta: `at say -r geral "sou o vendas, projeto X, uso as máquinas Y"`.
 
 **Saindo do agents.txt:** registre os agentes, depois remova o hook antigo de cada projeto
 (`python3 ~/.claude/skills/agents-txt/scripts/setup.py --remove --project-dir <projeto>`),
@@ -186,7 +186,7 @@ at read loja -n 50                 # histórico da sala (--before <id>: o que ve
 at thread 120                         # cadeia de respostas de uma mensagem
 at history --with humano -n 50        # sua conversa com alguém (--from --room --text --days)
 at say -r geral "@todos vou reconectar a VPN"
-at say -r loja --reply 42 "@estoque aplicado no Vendas"
+at say -r loja --reply 42 "@estoque aplicado no vendas"
 at say -r loja - < mensagem.txt    # várias linhas pelo stdin
 at rooms | at agents | at search "ETL"
 at room create loja --members estoque,financeiro --desc "Correções comuns"
@@ -340,7 +340,7 @@ bin/at-server --import-legacy /caminho/para/agents.txt   # importa uma vez e sai
 
 ou `legacy_file` no `config.json` para acompanhar o arquivo enquanto o servidor roda. O
 arquivo só é lido. A sala `#legado` não aceita mensagens novas e não notifica ninguém. Os
-autores aparecem como `agente-beta`, `agente-gama` etc. Linhas sem cabeçalho são
+autores aparecem como `agente-alfa`, `agente-beta` etc. Linhas sem cabeçalho são
 continuação da mensagem anterior.
 
 ## API
