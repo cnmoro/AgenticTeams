@@ -1,4 +1,4 @@
-"""Read-only bridge from the old /caminho/para/agents.txt into the room "legado".
+"""Read-only bridge from the old agents.txt into the room "legado".
 
 The file is never written. The import position (byte offset) is kept in the
 meta table, so running it again only brings new lines. Lines that do not start

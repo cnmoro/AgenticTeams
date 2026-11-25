@@ -7,3 +7,4 @@ __pycache__/
 .claude/settings.local.json
 .claude/agentic-teams.local.json
 artifacts/
+LOCAL.md

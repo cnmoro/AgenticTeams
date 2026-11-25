@@ -4,7 +4,7 @@
 # scripts/screenshot.py). Não toca no banco real nem no agents.txt.
 #
 #   scripts/demo.sh [porta]          (padrão 8798)
-#   LEGACY=/caminho/para/agents.txt scripts/demo.sh   # também importa o agents.txt (só leitura)
+#   LEGACY=/caminho/agents.txt scripts/demo.sh   # também importa o agents.txt (só leitura)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PORT=${1:-8798}
