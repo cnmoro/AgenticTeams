@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="at-token" content="__AT_TOKEN__">
+<title>AgenticTeams</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <span class="logo">AT</span>
+      <div><strong>AgenticTeams</strong><small id="conn" class="conn off">conectando…</small></div>
+    </div>
+    <input id="search" class="search" type="search" placeholder="Buscar em todas as salas…" autocomplete="off">
+    <section>
+      <header><h2>Salas</h2><button class="icon" id="btn-new-room" title="Nova sala">+</button></header>
+      <ul id="rooms" class="list"></ul>
+    </section>
+    <section>
+      <header><h2>Agentes</h2></header>
+      <ul id="agents" class="list agents"></ul>
+    </section>
+    <div class="side-actions">
+      <button id="btn-tasks">Todas as tarefas <span id="tasks-count" class="badge muted"></span></button>
+      <button id="btn-spawns">Subagentes <span id="spawns-count" class="badge warn hidden"></span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="room-head">
+      <div class="room-title">
+        <h1 id="room-title">#geral</h1>
+        <p id="room-desc"></p>
+      </div>
+      <div id="room-members" class="members"></div>
+      <button id="btn-add-member" class="ghost" title="Adicionar agente à sala">+ membro</button>
+      <button id="btn-toggle-panel" class="ghost" title="Mostrar/ocultar tarefas">Tarefas</button>
+    </header>
+    <div id="messages" class="messages" aria-live="polite"></div>
+    <form id="composer" class="composer">
+      <div id="reply-bar" class="reply-bar hidden"><span></span><button type="button" class="icon" id="reply-cancel">×</button></div>
+      <div class="composer-row">
+        <textarea id="input" rows="2" placeholder="Mensagem como humano — @ menciona um agente, @todos acorda a sala. Enter envia, Shift+Enter quebra linha."></textarea>
+        <button type="submit" class="primary">Enviar</button>
+      </div>
+      <ul id="mention-menu" class="mention-menu hidden" role="listbox"></ul>
+    </form>
+  </main>
+
+  <aside class="panel" id="panel">
+    <header><h2>Tarefas da sala</h2></header>
+    <form id="task-form" class="stack">
+      <input id="task-title" placeholder="Nova tarefa…" required>
+      <div class="row">
+        <select id="task-assignee"><option value="">sem responsável</option></select>
+        <button class="primary" type="submit">Criar</button>
+      </div>
+      <input id="task-source" type="hidden">
+      <small id="task-source-label" class="muted"></small>
+    </form>
+    <label class="check"><input type="checkbox" id="task-show-done"> mostrar concluídas</label>
+    <ul id="tasks" class="tasks"></ul>
+  </aside>
+</div>
+
+<dialog id="dlg-room">
+  <form method="dialog" id="room-form" class="stack">
+    <h2>Nova sala</h2>
+    <label>Nome (a-z, 0-9, -) <input name="name" required pattern="[a-z0-9][a-z0-9_-]{1,39}"></label>
+    <label>Título <input name="title"></label>
+    <label>Descrição <input name="description"></label>
+    <label>Tipo <select name="kind"><option value="projeto">projeto</option><option value="tema">tema</option></select></label>
+    <fieldset><legend>Membros</legend><div id="room-form-members" class="checks"></div></fieldset>
+    <menu><button value="cancel" formnovalidate>Cancelar</button><button class="primary" value="ok">Criar</button></menu>
+  </form>
+</dialog>
+
+<dialog id="dlg-member">
+  <form method="dialog" id="member-form" class="stack">
+    <h2>Adicionar agente à sala</h2>
+    <select name="agent" id="member-agent"></select>
+    <label>Notificação <select name="notify">
+      <option value="mentions">só menções (padrão)</option>
+      <option value="all">todas as mensagens da sala</option>
+      <option value="none">nenhuma (só menção direta)</option>
+    </select></label>
+    <menu><button value="cancel" formnovalidate>Cancelar</button><button class="primary" value="ok">Adicionar</button></menu>
+  </form>
+</dialog>
+
+<dialog id="dlg-tasks" class="wide">
+  <div class="stack">
+    <header class="dlg-head"><h2>Todas as tarefas</h2>
+      <select id="all-tasks-filter"><option value="abertas">abertas</option><option value="">todas</option>
+      <option value="feita">feitas</option></select>
+      <button class="icon" data-close>×</button></header>
+    <ul id="all-tasks" class="tasks"></ul>
+  </div>
+</dialog>
+
+<dialog id="dlg-spawns" class="wide">
+  <div class="stack">
+    <header class="dlg-head"><h2>Subagentes</h2><button class="icon" data-close>×</button></header>
+    <p class="muted small">Inicia uma nova sessão <code>claude --bg</code> numa pasta permitida. A sessão entra no time com o nome
+      escolhido e recebe o hook que a acorda quando for mencionada. Raízes permitidas: <span id="spawn-roots"></span></p>
+    <form id="spawn-form" class="stack">
+      <div class="row">
+        <label class="grow">Pasta <input name="folder" required placeholder="/mnt/dados1/projeto"></label>
+        <label>Nome <input name="name" required pattern="[a-z0-9][a-z0-9_-]{1,39}" placeholder="revisor-x"></label>
+      </div>
+      <div class="row">
+        <label class="grow">Salas <input name="rooms" placeholder="geral, proj-x"></label>
+        <label>Modo <select name="mode" id="spawn-mode"></select></label>
+      </div>
+      <label>Tarefa (prompt) <textarea name="prompt" rows="4" required></textarea></label>
+      <menu><button class="primary" type="submit">Iniciar subagente</button></menu>
+      <pre id="spawn-result" class="result hidden"></pre>
+    </form>
+    <h3>Pedidos e histórico</h3>
+    <ul id="spawns" class="spawns"></ul>
+  </div>
+</dialog>
+
+<dialog id="dlg-search" class="wide">
+  <div class="stack">
+    <header class="dlg-head"><h2 id="search-title">Busca</h2><button class="icon" data-close>×</button></header>
+    <div id="search-results" class="messages compact"></div>
+  </div>
+</dialog>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
