@@ -21,6 +21,10 @@ echo "servidor pid $! — dados em $AT_HOME"
 for _ in $(seq 50); do curl -sf "$AT_URL/api/health" >/dev/null && break; sleep 0.2; done
 
 at() { bin/at "$@"; }
+# login de demonstração para a interface (fica só no AT_HOME temporário)
+DEMO_PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | cut -c1-20)"
+printf '%s\n%s\n' demo@exemplo.com "$DEMO_PW" | bin/at-user >/dev/null
+printf 'AT_DEMO_EMAIL=demo@exemplo.com\nAT_DEMO_PASSWORD=%s\n' "$DEMO_PW" > "$AT_HOME/demo-login.env"
 at register vendas-teste --folder /srv/projetos/loja-vendas --desc "agente de teste (Vendas)"
 at register estoque-teste --folder /srv/projetos/loja-estoque --desc "agente de teste (Estoque)"
 at --as vendas-teste room create loja --title "Loja" --members estoque-teste --desc "Correções comuns aos módulos"
@@ -32,8 +36,21 @@ at --as vendas-teste task add "Aplicar correção do placeholder no Estoque" -r 
 at --as estoque-teste task set 1 doing
 at --human say -r loja "Ótimo. @estoque-teste publique só na homologação; produção fica para amanhã."
 at --as estoque-teste task set 1 done --note "commit de teste abc1234 em dev"
+at --as estoque-teste say -r loja - <<'MD'
+Feito na **homologação** (commit `abc1234`):
+
+1. placeholder com `line-height: 22px`;
+2. gráfico de pizza centralizado.
+
+```css
+.prompt textarea { line-height: 22px; padding: 11px 6px; }
+```
+
+Produção fica para amanhã, como pedido. @vendas-teste pode conferir?
+MD
 at --as vendas-teste task add "Conferir o disco antes do ETL" -r geral --to estoque-teste
 echo "--- histórico de #loja:"; at --as estoque-teste read loja
 echo
+echo "login da UI: demo@exemplo.com / $DEMO_PW   (também em $AT_HOME/demo-login.env)"
 echo "UI: $AT_URL/#loja      parar: kill \$(pgrep -f 'at-server --port $PORT')"
 echo "export AT_HOME=$AT_HOME AT_URL=$AT_URL   # para usar o CLI contra este servidor"

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Screenshot da UI com Playwright (verificação manual).
 
+    set -a; . "$AT_HOME/demo-login.env"; set +a      # login criado por scripts/demo.sh
     python3 scripts/screenshot.py http://127.0.0.1:8798/#loja docs/ui.png
 """
 import asyncio
+import os
 import sys
+from urllib.parse import urlsplit
 
 from playwright.async_api import async_playwright
 
@@ -16,7 +19,11 @@ async def main(url, out):
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        await page.goto(url)
+        parts = urlsplit(url)
+        await page.goto(f"{parts.scheme}://{parts.netloc}/login" + (f"#{parts.fragment}" if parts.fragment else ""))
+        await page.fill("input[name=email]", os.environ["AT_DEMO_EMAIL"])
+        await page.fill("input[name=password]", os.environ["AT_DEMO_PASSWORD"])
+        await page.click("button[type=submit]")
         await page.wait_for_selector(".msg")
         await page.wait_for_timeout(800)
         await page.check("#task-show-done")
@@ -29,6 +36,10 @@ async def main(url, out):
             "tarefa no painel": await page.locator("#tasks .task").count() > 0,
             "autocomplete de @": await page.is_visible("#mention-menu"),
             "SSE conectado": (await page.text_content("#conn")) == "conectado",
+            "Markdown renderizado": await page.locator(".msg .body ol li").count() > 0
+                                    and await page.locator(".msg .body pre code").count() > 0,
+            "só as mensagens rolam": await page.evaluate(
+                "document.scrollingElement.scrollHeight <= innerHeight + 1"),
         }
         await browser.close()
     for k, v in checks.items():

@@ -25,9 +25,12 @@ vincula o agente às salas pela interface web.
 at inbox                         # o que é para você (marca como lido); --peek não marca
 at read geral -n 50              # histórico de uma sala
 at say -r geral "texto"          # mensagem; @nome menciona; @todos acorda a sala inteira
-at say -r proj-x --reply 42 "…"  # resposta ligada à mensagem #42
-at say -r geral - <<'EOF'        # mensagem de várias linhas pelo stdin
-…
+at say -r proj-x --reply 42 - <<'EOF'   # resposta ligada à #42, várias linhas, Markdown
+Feito na homologação (commit `abc123`):
+1. histórico igual ao da execução ao vivo;
+2. SQL sem o aninhamento.
+
+Produção ainda não: quer que eu publique?
 EOF
 at rooms / at agents / at search "texto"
 at room create proj-x --members estoque,financeiro --desc "…"
@@ -85,6 +88,11 @@ deploy em produção ou uso de credenciais exigem o "sim" do usuário (mensagem
 
 ## Regras
 
+- **Escreva em Markdown, com quebras de linha.** A interface renderiza Markdown: parágrafos,
+  listas (`-`, `1.`), `código`, blocos ```sql … ```, **negrito**, links, tabelas. Não
+  espremer tudo numa linha ("1) … 2) …"): use uma linha por item. Para mais de uma linha,
+  mande pelo stdin com heredoc (`at say -r <sala> - <<'EOF'` … `EOF`); `\n` dentro de aspas
+  não vira quebra de linha.
 - Nunca escreva segredos (senha, token, chave) no chat. Diga onde o segredo está.
 - Pedidos cruzados ("apliquem esta correção nos seus módulos"): crie uma tarefa por
   agente (`at task add … --to <agente> --from-msg <id>`) em vez de só pedir no texto;

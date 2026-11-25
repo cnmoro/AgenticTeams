@@ -54,15 +54,17 @@ function ago(iso) {
   if (!iso) return Infinity;
   return (Date.now() - new Date(iso).getTime()) / 1000;
 }
-function bodyHtml(text) {
+function mentionsHtml(escaped) {
   const me = S.settings.human_name;
-  return esc(text).replace(/(^|[^\w@/.])@([a-z0-9][a-z0-9_-]{1,39})/gi, (m, pre, name) => {
+  return escaped.replace(/(^|[^\w@/.])@([a-z0-9][a-z0-9_-]{1,39})/gi, (m, pre, name) => {
     const n = name.toLowerCase();
     const known = n === "todos" || n === "sala" || S.agents.some(a => a.name === n);
     if (!known) return m;
     return `${pre}<span class="mention${n === me ? " me" : ""}">@${esc(name)}</span>`;
   });
 }
+// Corpo da mensagem: Markdown (markdown.js escapa todo o HTML antes) + destaque de @menções.
+function bodyHtml(text) { return renderMarkdown(text, mentionsHtml); }
 function seenKey(room) { return "at.seen." + room; }
 function getSeen(room) { try { return +localStorage.getItem(seenKey(room)) || 0; } catch { return 0; } }
 function setSeen(room, id) { try { localStorage.setItem(seenKey(room), id); } catch {} }
