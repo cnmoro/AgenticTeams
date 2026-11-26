@@ -427,3 +427,11 @@ def test_static_files_are_revalidated(env):
     import urllib.request
     with urllib.request.urlopen(env.url + "/static/app.js", timeout=10) as r:
         assert r.headers["Cache-Control"] == "no-cache" and r.headers["ETag"]
+
+
+def test_very_long_message(env):
+    a, b = env.register("alfa"), env.register("beta")
+    body = "@beta " + "\n".join(f"line {i} " + "x" * 90 for i in range(20000))  # ~2 MB
+    st, m = env.req("POST", "/api/rooms/general/messages", {"body": body}, a)
+    assert st == 200 and len(m["body"]) == len(body.strip())
+    assert inbox(env, b)[-1]["body"] == body.strip()

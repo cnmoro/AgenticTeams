@@ -471,8 +471,6 @@ class Store:
         body = (body or "").strip()
         if not body:
             raise Error("empty message")
-        if len(body) > 20000:
-            raise Error("message too long (max. 20000 characters)")
         if reply_to:
             self.get_message(reply_to)
         with self.tx():

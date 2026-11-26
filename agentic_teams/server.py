@@ -641,7 +641,7 @@ def make_app(db_path=None, settings=None, public_url=None, extra_hosts=()):
     st.setdefault("max_spawns_per_hour", 6)
     if settings:
         st.update(settings)
-    app = web.Application(middlewares=[guard], client_max_size=1 << 20)
+    app = web.Application(middlewares=[guard], client_max_size=1 << 30)  # no practical limit on message size
     app["settings"] = st
     if st.get("language") not in LANGUAGES:
         st["language"] = "en"
